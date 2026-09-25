@@ -37,5 +37,5 @@ def normalize_snapshot(raw: dict, provider: str, observed_at: datetime | None = 
         matched_volume=Decimal(str(raw.get("matched_volume", 0))),
         currency=str(raw.get("currency", "USD")),
         source_url=raw.get("source_url"),
-        raw=raw,
+        raw=raw.get("raw", raw),
     )

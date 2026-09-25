@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Protocol
 
-from .fixtures import sample_snapshots
 from .models import LiquiditySnapshot, Match
 from .normalization import normalize_snapshot
 
@@ -32,14 +31,6 @@ class LiquidityProvider(Protocol):
     name: str
 
     def snapshots(self, observed_at: datetime | None = None) -> list[LiquiditySnapshot]: ...
-
-
-class FixtureLiquidityProvider:
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-    def snapshots(self, observed_at: datetime | None = None) -> list[LiquiditySnapshot]:
-        return sample_snapshots(self.name)
 
 
 class CredentialedLiquidityProvider:
@@ -73,8 +64,8 @@ class PolymarketPublicLiquidityProvider:
     gamma_endpoint = "https://gamma-api.polymarket.com/events"
     clob_endpoint = "https://clob.polymarket.com/book"
 
-    def __init__(self, max_markets: int = 100, timeout_seconds: float = 15) -> None:
-        self.max_markets = max_markets
+    def __init__(self, max_events: int | None = None, timeout_seconds: float = 15) -> None:
+        self.max_events = max_events
         self.timeout_seconds = timeout_seconds
 
     def _get_json(self, url: str) -> object:
@@ -97,83 +88,91 @@ class PolymarketPublicLiquidityProvider:
             raise ProviderError(f"Polymarket request failed for {url}: {error}") from error
 
     @staticmethod
-    def _is_tennis(market: dict) -> bool:
-        text = " ".join(
-            str(market.get(field, ""))
-            for field in ("question", "slug", "description", "category", "tags", "event_name")
-        ).lower()
-        return any(term in text for term in ("tennis", "atp", "wta", "wimbledon", "roland garros", "us open"))
-
-    @staticmethod
     def _competitors(question: str) -> tuple[str, ...]:
         for separator in (" vs. ", " vs ", " v. ", " v "):
-            if separator in question.lower():
-                parts = question.lower().split(separator, 1)
+            index = question.casefold().find(separator)
+            if index >= 0:
+                parts = (question[:index], question[index + len(separator):])
                 return tuple(part.strip(" ?") for part in parts if part.strip(" ?"))
         return (question.strip(),) if question.strip() else ("Unknown",)
 
+    @staticmethod
+    def _is_match_winner_market(market: dict, event_name: str) -> bool:
+        question = " ".join(str(market.get("question", "")).split()).casefold()
+        title = " ".join(event_name.split()).casefold()
+        return bool(question and title and question == title)
+
     def snapshots(self, observed_at: datetime | None = None) -> list[LiquiditySnapshot]:
         observed = observed_at or datetime.now(timezone.utc)
-        markets: list[dict] = []
+        events: list[dict] = []
         offset = 0
-        while len(markets) < self.max_markets:
-            page_limit = min(100, self.max_markets - len(markets))
+        while self.max_events is None or len(events) < self.max_events:
+            page_limit = (
+                100 if self.max_events is None
+                else min(100, self.max_events - len(events))
+            )
             query = urllib.parse.urlencode({
                 "active": "true", "closed": "false", "limit": page_limit,
-                "offset": offset, "tag_slug": "tennis",
+                "offset": offset, "tag_slug": "tennis", "order": "endDate", "ascending": "true",
             })
             page = self._get_json(f"{self.gamma_endpoint}?{query}")
             if not isinstance(page, list) or not page:
                 break
-            for event in page:
-                if not isinstance(event, dict):
-                    continue
-                for market in event.get("markets", []):
-                    if isinstance(market, dict):
-                        enriched = dict(market)
-                        enriched.setdefault("event_id", event.get("id"))
-                        enriched.setdefault("event_name", event.get("title") or event.get("slug"))
-                        markets.append(enriched)
-                        if len(markets) >= self.max_markets:
-                            break
-                if len(markets) >= self.max_markets:
-                    break
+            events.extend(event for event in page if isinstance(event, dict))
             if len(page) < page_limit:
                 break
             offset += len(page)
 
         snapshots: list[LiquiditySnapshot] = []
-        for market in markets:
-            if not self._is_tennis(market):
+        for event in events:
+            event_name = str(event.get("title") or event.get("slug") or "")
+            if not event_name:
                 continue
-            token_ids = market.get("clobTokenIds", "[]")
+            market = next((
+                market for market in event.get("markets", [])
+                if isinstance(market, dict)
+                and self._is_match_winner_market(market, event_name)
+            ), None)
+            if market is None:
+                continue
+            raw_token_ids = market.get("clobTokenIds", "[]")
             try:
-                token_ids = json.loads(token_ids) if isinstance(token_ids, str) else token_ids
+                token_ids = json.loads(raw_token_ids) if isinstance(raw_token_ids, str) else raw_token_ids
             except ValueError:
                 token_ids = []
-            if not token_ids:
+            if not isinstance(token_ids, list) or not token_ids:
                 continue
-            try:
-                book = self._get_json(
-                    f"{self.clob_endpoint}?{urllib.parse.urlencode({'token_id': token_ids[0]})}"
-                )
-            except PolymarketNotFoundError:
-                # Active Gamma markets can have outcome tokens without a CLOB book yet.
+            books: list[dict] = []
+            for token_id in token_ids[:2]:
+                try:
+                    book = self._get_json(
+                        f"{self.clob_endpoint}?{urllib.parse.urlencode({'token_id': token_id})}"
+                    )
+                except PolymarketNotFoundError:
+                    continue
+                if isinstance(book, dict):
+                    books.append(book)
+            if not books:
                 continue
-            if not isinstance(book, dict):
-                continue
-            bids = book.get("bids", [])
-            asks = book.get("asks", [])
+            bids = [level for book in books for level in book.get("bids", [])]
+            asks = [level for book in books for level in book.get("asks", [])]
             bid_liquidity = sum(Decimal(str(item["price"])) * Decimal(str(item["size"])) for item in bids)
             ask_liquidity = sum(Decimal(str(item["size"])) for item in asks)
-            raw = {"market": market, "order_book": book}
+            market = {
+                **market,
+                "event_id": event.get("id"),
+                "event_name": event_name,
+                "event_start_time": event.get("startTime") or event.get("startDate"),
+            }
+            raw = {"market": market, "order_books": books}
             snapshots.append(normalize_snapshot({
                 "event_id": market.get("event_id") or market.get("conditionId") or market.get("id"),
                 "market_id": market.get("id") or market.get("conditionId"),
-                "event_name": market.get("event_name") or market.get("question") or market.get("slug") or "Tennis market",
+                "event_name": event_name,
                 "market_name": "Polymarket CLOB",
                 "competitors": self._competitors(str(market.get("question", ""))),
-                "start_time": market.get("startDate") or observed.isoformat(),
+                "start_time": market.get("event_start_time") or market.get("startTime")
+                or market.get("startDate") or observed.isoformat(),
                 "available_back": bid_liquidity,
                 "available_unmatched": ask_liquidity,
                 "matched_volume": market.get("volume", 0),

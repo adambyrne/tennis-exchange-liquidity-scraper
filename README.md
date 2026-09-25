@@ -37,15 +37,19 @@ dependency-free and suitable for embedding.
 
 ## Exchange liquidity scraper
 
-The first scraper version is runnable without accounts or credentials:
+The scraper collects live public Polymarket tennis match markets without
+accounts or credentials:
 
 ```bash
 python main.py scrape --once --db liquidity.sqlite3
 python main.py export-liquidity --db liquidity.sqlite3 liquidity.csv
 ```
 
-The sample run writes normalized snapshots for Betfair, Polymarket, and Kalshi
-fixtures. Each snapshot preserves provider/event/market IDs, competitors, start
+The collector pages through active tennis events and records the match-winner
+market for each event, rather than stopping after the first 100 child markets
+or collecting futures and side markets. It reads both outcome order books;
+active events without an available CLOB order book are skipped. Each snapshot
+preserves provider/event/market IDs, competitors, start
 and observation timestamps, automated competition grade, pre-match/in-play
 phase, available back and unmatched liquidity, matched volume, currency, raw
 provenance, and optional cross-venue match metadata. SQLite is the local-first
@@ -62,9 +66,11 @@ The normal collection cadence is ten minutes:
 python main.py scrape --db liquidity.sqlite3
 ```
 
-`--live` selects the credentialed adapter boundaries, but live transport is
-deliberately not enabled for Betfair and Kalshi in this sample build. Polymarket
-market discovery and CLOB order books are public and can be collected with:
+`--live` remains accepted for backwards compatibility but is no longer needed.
+Polymarket market discovery and CLOB order books are public. Previous built-in
+fixture data has been removed; when the database is opened, old rows marked
+`fixture://sample` are automatically deleted. Betfair and Kalshi live
+transport is not enabled:
 
 ```bash
 python main.py scrape --live --provider polymarket --once --db liquidity.sqlite3
@@ -78,11 +84,9 @@ certificate bundle used by the adapter:
 python -m pip install --upgrade certifi
 ```
 
-The adapter filters active tennis markets, reads a public CLOB order book, and
-stores each observation locally. Re-running it builds your own historical
-series; it does not fabricate past order-book data. Some active Gamma markets
-do not yet have a CLOB order book; those individual markets are skipped while
-collection continues for the rest. Betfair's Exchange API and Kalshi's Trade
+The adapter stores each observation locally. Re-running it builds your own
+historical series; it does not fabricate past order-book data. Betfair's
+Exchange API and Kalshi's Trade
 API have different authentication, market semantics, rate limits, and terms; configure credentials
 only after reviewing the current provider documentation and terms. The adapters
 fail explicitly rather than making an unauthenticated request. The environment
