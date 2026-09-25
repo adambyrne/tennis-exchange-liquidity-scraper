@@ -1,11 +1,22 @@
 from __future__ import annotations
 
 import os
+import json
+import ssl
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Protocol
 
 from .fixtures import sample_snapshots
 from .models import LiquiditySnapshot, Match
+from .normalization import normalize_snapshot
+
+try:
+    import certifi
+except ImportError:  # pragma: no cover - depends on the host Python installation
+    certifi = None
 
 
 class ProviderError(RuntimeError):
@@ -44,6 +55,108 @@ class CredentialedLiquidityProvider:
             f"{self.name} transport is not enabled in the sample build. Implement the documented API client "
             f"before making live requests to {self.endpoint}"
         )
+
+
+class PolymarketPublicLiquidityProvider:
+    """Collect active tennis markets from Polymarket's public APIs.
+
+    Market discovery and CLOB order books are public. This adapter intentionally
+    does not place orders and does not require a token or wallet credentials.
+    """
+
+    name = "polymarket"
+    gamma_endpoint = "https://gamma-api.polymarket.com/markets"
+    clob_endpoint = "https://clob.polymarket.com/book"
+
+    def __init__(self, max_markets: int = 100, timeout_seconds: float = 15) -> None:
+        self.max_markets = max_markets
+        self.timeout_seconds = timeout_seconds
+
+    def _get_json(self, url: str) -> object:
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "tennis-exchange-liquidity-scraper/1.0",
+            },
+        )
+        try:
+            context = ssl.create_default_context(cafile=certifi.where()) if certifi else None
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds, context=context) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (OSError, ValueError) as error:
+            raise ProviderError(f"Polymarket request failed for {url}: {error}") from error
+
+    @staticmethod
+    def _is_tennis(market: dict) -> bool:
+        text = " ".join(
+            str(market.get(field, ""))
+            for field in ("question", "slug", "description", "category", "tags")
+        ).lower()
+        return any(term in text for term in ("tennis", "atp", "wta", "wimbledon", "roland garros", "us open"))
+
+    @staticmethod
+    def _competitors(question: str) -> tuple[str, ...]:
+        for separator in (" vs. ", " vs ", " v. ", " v "):
+            if separator in question.lower():
+                parts = question.lower().split(separator, 1)
+                return tuple(part.strip(" ?") for part in parts if part.strip(" ?"))
+        return (question.strip(),) if question.strip() else ("Unknown",)
+
+    def snapshots(self, observed_at: datetime | None = None) -> list[LiquiditySnapshot]:
+        observed = observed_at or datetime.now(timezone.utc)
+        markets: list[dict] = []
+        offset = 0
+        while len(markets) < self.max_markets:
+            page_limit = min(100, self.max_markets - len(markets))
+            query = urllib.parse.urlencode({
+                "active": "true", "closed": "false", "limit": page_limit,
+                "offset": offset,
+            })
+            page = self._get_json(f"{self.gamma_endpoint}?{query}")
+            if not isinstance(page, list) or not page:
+                break
+            markets.extend(item for item in page if isinstance(item, dict))
+            if len(page) < page_limit:
+                break
+            offset += len(page)
+
+        snapshots: list[LiquiditySnapshot] = []
+        for market in markets:
+            if not self._is_tennis(market):
+                continue
+            token_ids = market.get("clobTokenIds", "[]")
+            try:
+                token_ids = json.loads(token_ids) if isinstance(token_ids, str) else token_ids
+            except ValueError:
+                token_ids = []
+            if not token_ids:
+                continue
+            book = self._get_json(
+                f"{self.clob_endpoint}?{urllib.parse.urlencode({'token_id': token_ids[0]})}"
+            )
+            if not isinstance(book, dict):
+                continue
+            bids = book.get("bids", [])
+            asks = book.get("asks", [])
+            bid_liquidity = sum(Decimal(str(item["price"])) * Decimal(str(item["size"])) for item in bids)
+            ask_liquidity = sum(Decimal(str(item["size"])) for item in asks)
+            raw = {"market": market, "order_book": book}
+            snapshots.append(normalize_snapshot({
+                "event_id": market.get("conditionId") or market.get("id"),
+                "market_id": market.get("id"),
+                "event_name": market.get("question") or market.get("slug") or "Tennis market",
+                "market_name": "Polymarket CLOB",
+                "competitors": self._competitors(str(market.get("question", ""))),
+                "start_time": market.get("startDate") or observed.isoformat(),
+                "available_back": bid_liquidity,
+                "available_unmatched": ask_liquidity,
+                "matched_volume": market.get("volume", 0),
+                "currency": "USDC",
+                "source_url": f"https://polymarket.com/event/{market.get('slug', '')}",
+                "raw": raw,
+            }, self.name, observed))
+        return snapshots
 
 
 class BetfairLiquidityProvider(CredentialedLiquidityProvider):
