@@ -33,6 +33,8 @@ def connect_database(path: str | Path) -> sqlite3.Connection:
     connection = sqlite3.connect(path)
     connection.row_factory = sqlite3.Row
     connection.executescript(SCHEMA)
+    connection.execute("DELETE FROM liquidity_snapshots WHERE source_url = 'fixture://sample'")
+    connection.commit()
     return connection
 
 
