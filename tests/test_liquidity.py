@@ -7,7 +7,7 @@ from tennis_betting.classification import classify_event
 from tennis_betting.matching import link_match
 from tennis_betting.models import CompetitionGrade, Phase
 from tennis_betting.normalization import normalize_snapshot
-from tennis_betting.providers import FixtureLiquidityProvider, ProviderError
+from tennis_betting.providers import FixtureLiquidityProvider, PolymarketPublicLiquidityProvider, ProviderError
 from tennis_betting.scraper import collect_once
 from tennis_betting.storage import connect_database, export_liquidity_csv
 
@@ -47,6 +47,22 @@ class LiquidityTests(unittest.TestCase):
         from tennis_betting.providers import BetfairLiquidityProvider
         with self.assertRaises(ProviderError):
             BetfairLiquidityProvider().snapshots()
+
+    def test_public_polymarket_adapter_normalizes_market_and_book(self):
+        provider = PolymarketPublicLiquidityProvider(max_markets=1)
+        provider._get_json = lambda url: (
+            [{"id": "market-1", "conditionId": "event-1", "question": "Tennis: Player A vs Player B",
+              "slug": "tennis-player-a-vs-player-b", "startDate": "2026-09-25T12:00:00Z",
+              "clobTokenIds": '["token-1"]', "volume": "123.45"}]
+            if "gamma-api" in url else
+            {"bids": [{"price": "0.50", "size": "10"}],
+             "asks": [{"price": "0.60", "size": "8"}]}
+        )
+        snapshots = provider.snapshots(datetime(2026, 9, 25, tzinfo=timezone.utc))
+        self.assertEqual(len(snapshots), 1)
+        self.assertEqual(snapshots[0].source_market_id, "market-1")
+        self.assertEqual(snapshots[0].available_back, 5)
+        self.assertEqual(snapshots[0].available_unmatched, 8)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,8 @@ from .calculations import combined_odds, potential_returns
 from .models import Selection, Slip
 from .providers import StaticOddsProvider
 from .providers import (
-    BetfairLiquidityProvider, FixtureLiquidityProvider, KalshiLiquidityProvider, PolymarketLiquidityProvider,
+    BetfairLiquidityProvider, FixtureLiquidityProvider, KalshiLiquidityProvider,
+    PolymarketLiquidityProvider, PolymarketPublicLiquidityProvider,
 )
 from .scraper import collect_once, run_scheduler
 from .storage import (
@@ -39,6 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     scrape = sub.add_parser("scrape", help="collect exchange liquidity into SQLite")
     scrape.add_argument("--db", default="liquidity.sqlite3")
     scrape.add_argument("--live", action="store_true", help="use credentialed adapters (never the default)")
+    scrape.add_argument("--provider", choices=("all", "polymarket"), default="all",
+                        help="live provider to collect (use polymarket for public tennis data)")
     scrape.add_argument("--once", action="store_true", help="collect one interval and exit")
     scrape.add_argument("--interval", type=int, default=600)
     export = sub.add_parser("export-liquidity", help="export stored liquidity snapshots")
@@ -102,11 +105,12 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Potential return: {potential_returns(slip, args.stake)[0]:.2f}")
         export_csv(slip, args.file + ".csv")
     elif args.command == "scrape":
-        providers = (
-            [BetfairLiquidityProvider(), PolymarketLiquidityProvider(), KalshiLiquidityProvider()]
-            if args.live else
-            [FixtureLiquidityProvider(name) for name in ("betfair", "polymarket", "kalshi")]
-        )
+        if args.live and args.provider == "polymarket":
+            providers = [PolymarketPublicLiquidityProvider()]
+        elif args.live:
+            providers = [BetfairLiquidityProvider(), PolymarketLiquidityProvider(), KalshiLiquidityProvider()]
+        else:
+            providers = [FixtureLiquidityProvider(name) for name in ("betfair", "polymarket", "kalshi")]
         connection = connect_database(args.db)
         if args.once:
             print(f"Collected {len(collect_once(providers, connection))} snapshots")

@@ -63,13 +63,29 @@ python main.py scrape --db liquidity.sqlite3
 ```
 
 `--live` selects the credentialed adapter boundaries, but live transport is
-deliberately not enabled in this sample build. Betfair's Exchange API,
-Polymarket's public Gamma/CLOB APIs, and Kalshi's Trade API have different
+deliberately not enabled for Betfair and Kalshi in this sample build. Polymarket
+market discovery and CLOB order books are public and can be collected with:
+
+```bash
+python main.py scrape --live --provider polymarket --once --db liquidity.sqlite3
+python main.py export-liquidity --db liquidity.sqlite3 polymarket.csv
+```
+
+If Python reports a local certificate verification error on Windows, update the
+certificate bundle used by the adapter:
+
+```bash
+python -m pip install --upgrade certifi
+```
+
+The adapter filters active tennis markets, reads a public CLOB order book, and
+stores each observation locally. Re-running it builds your own historical
+series; it does not fabricate past order-book data. Betfair's Exchange API and
+Kalshi's Trade API have different
 authentication, market semantics, rate limits, and terms; configure credentials
 only after reviewing the current provider documentation and terms. The adapters
 fail explicitly rather than making an unauthenticated request. The environment
-names reserved for future clients are `BETFAIR_APP_KEY`,
-`POLYMARKET_API_TOKEN`, and `KALSHI_API_KEY`.
+names reserved for future clients are `BETFAIR_APP_KEY` and `KALSHI_API_KEY`.
 
 Classification uses provider/event-name rules for Grand Slam, ATP, WTA, ATP
 Challenger, ITF, and UTR. The `classification_overrides` table is the manual
