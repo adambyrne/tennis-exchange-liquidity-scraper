@@ -80,9 +80,10 @@ python -m pip install --upgrade certifi
 
 The adapter filters active tennis markets, reads a public CLOB order book, and
 stores each observation locally. Re-running it builds your own historical
-series; it does not fabricate past order-book data. Betfair's Exchange API and
-Kalshi's Trade API have different
-authentication, market semantics, rate limits, and terms; configure credentials
+series; it does not fabricate past order-book data. Some active Gamma markets
+do not yet have a CLOB order book; those individual markets are skipped while
+collection continues for the rest. Betfair's Exchange API and Kalshi's Trade
+API have different authentication, market semantics, rate limits, and terms; configure credentials
 only after reviewing the current provider documentation and terms. The adapters
 fail explicitly rather than making an unauthenticated request. The environment
 names reserved for future clients are `BETFAIR_APP_KEY` and `KALSHI_API_KEY`.

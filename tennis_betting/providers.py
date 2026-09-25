@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import json
 import ssl
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -20,6 +21,10 @@ except ImportError:  # pragma: no cover - depends on the host Python installatio
 
 
 class ProviderError(RuntimeError):
+    pass
+
+
+class PolymarketNotFoundError(ProviderError):
     pass
 
 
@@ -84,6 +89,10 @@ class PolymarketPublicLiquidityProvider:
             context = ssl.create_default_context(cafile=certifi.where()) if certifi else None
             with urllib.request.urlopen(request, timeout=self.timeout_seconds, context=context) as response:
                 return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                raise PolymarketNotFoundError(f"Polymarket resource not found: {url}") from error
+            raise ProviderError(f"Polymarket request failed for {url}: HTTP {error.code}") from error
         except (OSError, ValueError) as error:
             raise ProviderError(f"Polymarket request failed for {url}: {error}") from error
 
@@ -144,9 +153,13 @@ class PolymarketPublicLiquidityProvider:
                 token_ids = []
             if not token_ids:
                 continue
-            book = self._get_json(
-                f"{self.clob_endpoint}?{urllib.parse.urlencode({'token_id': token_ids[0]})}"
-            )
+            try:
+                book = self._get_json(
+                    f"{self.clob_endpoint}?{urllib.parse.urlencode({'token_id': token_ids[0]})}"
+                )
+            except PolymarketNotFoundError:
+                # Active Gamma markets can have outcome tokens without a CLOB book yet.
+                continue
             if not isinstance(book, dict):
                 continue
             bids = book.get("bids", [])

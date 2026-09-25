@@ -7,7 +7,12 @@ from tennis_betting.classification import classify_event
 from tennis_betting.matching import link_match
 from tennis_betting.models import CompetitionGrade, Phase
 from tennis_betting.normalization import normalize_snapshot
-from tennis_betting.providers import FixtureLiquidityProvider, PolymarketPublicLiquidityProvider, ProviderError
+from tennis_betting.providers import (
+    FixtureLiquidityProvider,
+    PolymarketNotFoundError,
+    PolymarketPublicLiquidityProvider,
+    ProviderError,
+)
 from tennis_betting.scraper import collect_once
 from tennis_betting.storage import connect_database, export_liquidity_csv
 
@@ -65,6 +70,26 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(snapshots[0].source_market_id, "market-1")
         self.assertEqual(snapshots[0].available_back, 5)
         self.assertEqual(snapshots[0].available_unmatched, 8)
+
+    def test_public_polymarket_skips_markets_without_order_books(self):
+        provider = PolymarketPublicLiquidityProvider(max_markets=2)
+
+        def get_json(url):
+            if "gamma-api" in url:
+                return [{"id": "event-1", "title": "Tennis",
+                         "markets": [
+                             {"id": "no-book", "question": "Tennis: unavailable", "clobTokenIds": '["missing"]'},
+                             {"id": "has-book", "question": "Tennis: available", "clobTokenIds": '["available"]'},
+                         ]}]
+            if "token_id=missing" in url:
+                raise PolymarketNotFoundError("no order book")
+            return {"bids": [{"price": "0.50", "size": "10"}],
+                    "asks": [{"price": "0.60", "size": "8"}]}
+
+        provider._get_json = get_json
+        snapshots = provider.snapshots(datetime(2026, 9, 25, tzinfo=timezone.utc))
+        self.assertEqual(len(snapshots), 1)
+        self.assertEqual(snapshots[0].source_market_id, "has-book")
 
 
 if __name__ == "__main__":
