@@ -9,6 +9,7 @@ from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 
+from .classification import classify_event
 from .models import BetType, LiquiditySnapshot, Selection, Slip
 
 SCHEMA = """
@@ -34,6 +35,22 @@ def connect_database(path: str | Path) -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     connection.executescript(SCHEMA)
     connection.execute("DELETE FROM liquidity_snapshots WHERE source_url = 'fixture://sample'")
+    connection.execute(
+        """UPDATE liquidity_snapshots SET market_name = 'Match Winner'
+        WHERE provider = 'polymarket' AND market_name = 'Polymarket CLOB'"""
+    )
+    unknown_rows = connection.execute(
+        """SELECT id, event_name FROM liquidity_snapshots
+        WHERE provider = 'polymarket' AND grade = 'unknown'"""
+    ).fetchall()
+    connection.executemany(
+        "UPDATE liquidity_snapshots SET grade = ? WHERE id = ?",
+        [
+            (grade.value, row["id"])
+            for row in unknown_rows
+            if (grade := classify_event(row["event_name"])).value != "unknown"
+        ],
+    )
     connection.commit()
     return connection
 

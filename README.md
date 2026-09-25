@@ -92,6 +92,14 @@ only after reviewing the current provider documentation and terms. The adapters
 fail explicitly rather than making an unauthenticated request. The environment
 names reserved for future clients are `BETFAIR_APP_KEY` and `KALSHI_API_KEY`.
 
+Polymarket `grade` uses the event's official sport/series metadata, with
+tournament-name rules for ITF circuit codes such as `M25` and `W50`.
+`market_name` describes the selected market type (`Match Winner`), not the CLOB
+API used to retrieve its order book. On database open, existing Polymarket rows
+with the old generic market label are updated, as are unknown grades that can
+be inferred from the stored tournament name. Rows that lack enough stored
+metadata are corrected as new snapshots are collected.
+
 Classification uses provider/event-name rules for Grand Slam, ATP, WTA, ATP
 Challenger, ITF, and UTR. The `classification_overrides` table is the manual
 exception point. Matching is deterministic and conservative: mismatched times,

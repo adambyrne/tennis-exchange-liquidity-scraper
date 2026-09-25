@@ -11,6 +11,7 @@ from decimal import Decimal
 from typing import Protocol
 
 from .models import LiquiditySnapshot, Match
+from .classification import classify_event
 from .normalization import normalize_snapshot
 
 try:
@@ -163,19 +164,34 @@ class PolymarketPublicLiquidityProvider:
                 "event_id": event.get("id"),
                 "event_name": event_name,
                 "event_start_time": event.get("startTime") or event.get("startDate"),
+                "event_sport": event.get("sport"),
+                "event_series": event.get("series"),
             }
             raw = {"market": market, "order_books": books}
+            sport = event.get("sport")
+            sport_names = [
+                sport.get("name", ""), sport.get("sport", ""),
+            ] if isinstance(sport, dict) else [str(sport or "")]
+            series_names = [
+                str(series.get("title", ""))
+                for series in event.get("series", [])
+                if isinstance(series, dict)
+            ]
+            grade = classify_event(event_name)
+            if grade.value == "unknown":
+                grade = classify_event(" ".join([*sport_names, *series_names]))
             snapshots.append(normalize_snapshot({
                 "event_id": market.get("event_id") or market.get("conditionId") or market.get("id"),
                 "market_id": market.get("id") or market.get("conditionId"),
                 "event_name": event_name,
-                "market_name": "Polymarket CLOB",
+                "market_name": "Match Winner",
                 "competitors": self._competitors(str(market.get("question", ""))),
                 "start_time": market.get("event_start_time") or market.get("startTime")
                 or market.get("startDate") or observed.isoformat(),
                 "available_back": bid_liquidity,
                 "available_unmatched": ask_liquidity,
                 "matched_volume": market.get("volume", 0),
+                "grade": market.get("grade") or grade.value,
                 "currency": "USDC",
                 "source_url": f"https://polymarket.com/event/{market.get('slug', '')}",
                 "raw": raw,

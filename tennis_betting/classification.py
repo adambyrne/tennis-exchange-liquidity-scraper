@@ -23,6 +23,8 @@ def classify_event(name: str, override: CompetitionGrade | str | None = None) ->
     for grade, terms in _RULES:
         if any(term in text for term in terms):
             return grade
+    if re.search(r"\b(?:m15|m25|w15|w25|w35|w50|w60|w75|w100)\b", text):
+        return CompetitionGrade.ITF
     return CompetitionGrade.UNKNOWN
 
 
