@@ -51,9 +51,11 @@ class LiquidityTests(unittest.TestCase):
     def test_public_polymarket_adapter_normalizes_market_and_book(self):
         provider = PolymarketPublicLiquidityProvider(max_markets=1)
         provider._get_json = lambda url: (
-            [{"id": "market-1", "conditionId": "event-1", "question": "Tennis: Player A vs Player B",
-              "slug": "tennis-player-a-vs-player-b", "startDate": "2026-09-25T12:00:00Z",
-              "clobTokenIds": '["token-1"]', "volume": "123.45"}]
+            [{"id": "event-1", "title": "ATP Tennis",
+              "markets": [{"id": "market-1", "conditionId": "condition-1",
+              "question": "Player A vs Player B", "slug": "tennis-player-a-vs-player-b",
+              "startDate": "2026-09-25T12:00:00Z", "clobTokenIds": '["token-1"]',
+              "volume": "123.45"}]}]
             if "gamma-api" in url else
             {"bids": [{"price": "0.50", "size": "10"}],
              "asks": [{"price": "0.60", "size": "8"}]}

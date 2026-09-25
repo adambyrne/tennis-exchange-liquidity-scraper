@@ -65,7 +65,7 @@ class PolymarketPublicLiquidityProvider:
     """
 
     name = "polymarket"
-    gamma_endpoint = "https://gamma-api.polymarket.com/markets"
+    gamma_endpoint = "https://gamma-api.polymarket.com/events"
     clob_endpoint = "https://clob.polymarket.com/book"
 
     def __init__(self, max_markets: int = 100, timeout_seconds: float = 15) -> None:
@@ -91,7 +91,7 @@ class PolymarketPublicLiquidityProvider:
     def _is_tennis(market: dict) -> bool:
         text = " ".join(
             str(market.get(field, ""))
-            for field in ("question", "slug", "description", "category", "tags")
+            for field in ("question", "slug", "description", "category", "tags", "event_name")
         ).lower()
         return any(term in text for term in ("tennis", "atp", "wta", "wimbledon", "roland garros", "us open"))
 
@@ -111,12 +111,24 @@ class PolymarketPublicLiquidityProvider:
             page_limit = min(100, self.max_markets - len(markets))
             query = urllib.parse.urlencode({
                 "active": "true", "closed": "false", "limit": page_limit,
-                "offset": offset,
+                "offset": offset, "tag_slug": "tennis",
             })
             page = self._get_json(f"{self.gamma_endpoint}?{query}")
             if not isinstance(page, list) or not page:
                 break
-            markets.extend(item for item in page if isinstance(item, dict))
+            for event in page:
+                if not isinstance(event, dict):
+                    continue
+                for market in event.get("markets", []):
+                    if isinstance(market, dict):
+                        enriched = dict(market)
+                        enriched.setdefault("event_id", event.get("id"))
+                        enriched.setdefault("event_name", event.get("title") or event.get("slug"))
+                        markets.append(enriched)
+                        if len(markets) >= self.max_markets:
+                            break
+                if len(markets) >= self.max_markets:
+                    break
             if len(page) < page_limit:
                 break
             offset += len(page)
@@ -143,9 +155,9 @@ class PolymarketPublicLiquidityProvider:
             ask_liquidity = sum(Decimal(str(item["size"])) for item in asks)
             raw = {"market": market, "order_book": book}
             snapshots.append(normalize_snapshot({
-                "event_id": market.get("conditionId") or market.get("id"),
-                "market_id": market.get("id"),
-                "event_name": market.get("question") or market.get("slug") or "Tennis market",
+                "event_id": market.get("event_id") or market.get("conditionId") or market.get("id"),
+                "market_id": market.get("id") or market.get("conditionId"),
+                "event_name": market.get("event_name") or market.get("question") or market.get("slug") or "Tennis market",
                 "market_name": "Polymarket CLOB",
                 "competitors": self._competitors(str(market.get("question", ""))),
                 "start_time": market.get("startDate") or observed.isoformat(),
