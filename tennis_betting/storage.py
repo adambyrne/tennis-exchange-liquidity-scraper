@@ -4,8 +4,9 @@ import csv
 import json
 import sqlite3
 from dataclasses import asdict
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
+from enum import Enum
 from pathlib import Path
 
 from .models import BetType, LiquiditySnapshot, Selection, Slip
@@ -47,7 +48,8 @@ def save_snapshots(connection: sqlite3.Connection, snapshots: list[LiquiditySnap
             json.dumps(item.competitor_names), item.start_time.isoformat(), item.observed_at.isoformat(),
             item.grade.value, item.phase.value, str(item.available_back), str(item.available_unmatched),
             str(item.matched_volume), item.currency, item.source_url, item.match_key,
-            str(item.match_confidence) if item.match_confidence is not None else None, json.dumps(item.raw),
+            str(item.match_confidence) if item.match_confidence is not None else None,
+            json.dumps(item.raw, default=_json),
         ) for item in snapshots],
     )
     connection.commit()
@@ -77,11 +79,11 @@ def export_liquidity_parquet(connection: sqlite3.Connection, path: str | Path) -
 def _json(value: object) -> object:
     if isinstance(value, Decimal):
         return str(value)
-    if isinstance(value, datetime):
+    if isinstance(value, (date, datetime)):
         return value.isoformat()
-    if isinstance(value, BetType):
+    if isinstance(value, Enum):
         return value.value
-    return value
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def save_slip(slip: Slip, path: str | Path) -> None:
