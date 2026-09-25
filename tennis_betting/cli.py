@@ -118,7 +118,11 @@ def main(argv: list[str] | None = None) -> None:
             run_scheduler(providers, connection, args.interval)
     elif args.command == "export-liquidity":
         connection = connect_database(args.db)
-        if args.format == "csv":
-            export_liquidity_csv(connection, args.file)
-        else:
-            export_liquidity_parquet(connection, args.file)
+        try:
+            if args.format == "csv":
+                count = export_liquidity_csv(connection, args.file)
+            else:
+                count = export_liquidity_parquet(connection, args.file)
+        finally:
+            connection.close()
+        print(f"Exported {count} snapshots to {args.file}")

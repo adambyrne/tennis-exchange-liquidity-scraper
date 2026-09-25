@@ -1,10 +1,13 @@
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
+from io import StringIO
 from pathlib import Path
 
+from tennis_betting.cli import main
 from tennis_betting.classification import classify_event
 from tennis_betting.matching import link_match
 from tennis_betting.models import CompetitionGrade, Phase
@@ -49,6 +52,19 @@ class LiquidityTests(unittest.TestCase):
             export_liquidity_csv(connection, output)
             self.assertIn("source_market_id", output.read_text(encoding="utf-8"))
             connection.close()
+
+    def test_cli_reports_csv_export_path_and_row_count(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "liquidity.sqlite3"
+            connection = connect_database(db)
+            save_snapshots(connection, FixtureLiquidityProvider("betfair").snapshots())
+            connection.close()
+            output = Path(directory) / "liquidity.csv"
+            captured = StringIO()
+            with redirect_stdout(captured):
+                main(["export-liquidity", "--db", str(db), str(output)])
+            self.assertIn(f"Exported 2 snapshots to {output}", captured.getvalue())
+            self.assertTrue(output.exists())
 
     def test_snapshot_raw_metadata_serializes_decimal_values(self):
         with tempfile.TemporaryDirectory() as directory:

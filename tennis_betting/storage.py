@@ -56,16 +56,17 @@ def save_snapshots(connection: sqlite3.Connection, snapshots: list[LiquiditySnap
     return connection.execute("SELECT changes()").fetchone()[0]
 
 
-def export_liquidity_csv(connection: sqlite3.Connection, path: str | Path) -> None:
+def export_liquidity_csv(connection: sqlite3.Connection, path: str | Path) -> int:
     cursor = connection.execute("SELECT * FROM liquidity_snapshots ORDER BY observed_at")
     rows = cursor.fetchall()
     with Path(path).open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow([column[0] for column in cursor.description])
         writer.writerows(tuple(row) for row in rows)
+    return len(rows)
 
 
-def export_liquidity_parquet(connection: sqlite3.Connection, path: str | Path) -> None:
+def export_liquidity_parquet(connection: sqlite3.Connection, path: str | Path) -> int:
     try:
         import pyarrow as pa
         import pyarrow.parquet as pq
@@ -74,6 +75,7 @@ def export_liquidity_parquet(connection: sqlite3.Connection, path: str | Path) -
     rows = connection.execute("SELECT * FROM liquidity_snapshots ORDER BY observed_at").fetchall()
     table = pa.Table.from_pylist([dict(row) for row in rows])
     pq.write_table(table, path)
+    return len(rows)
 
 
 def _json(value: object) -> object:
