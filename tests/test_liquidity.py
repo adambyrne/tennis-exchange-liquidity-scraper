@@ -55,6 +55,10 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(item.grade, CompetitionGrade.ATP_CHALLENGER)
         self.assertEqual(item.phase, Phase.IN_PLAY)
         self.assertEqual(classify_event("The Championships"), CompetitionGrade.UNKNOWN)
+        self.assertEqual(classify_event("M25 Sharm ElSheikh"), CompetitionGrade.ITF)
+        self.assertEqual(classify_event("M25 Sharm ElSheikh", "itf"), CompetitionGrade.ITF)
+        self.assertEqual(classify_event("Korea Open", "wta"), CompetitionGrade.WTA)
+        self.assertEqual(classify_event("Chengdu Open", "atp"), CompetitionGrade.ATP)
 
     def test_match_link_is_conservative(self):
         start = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -117,6 +121,28 @@ class LiquidityTests(unittest.TestCase):
             self.assertEqual([row[0] for row in rows], ["real-market"])
             connection.close()
 
+    def test_database_connection_repairs_legacy_polymarket_labels(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "liquidity.sqlite3"
+            connection = connect_database(db)
+            snapshot = replace(
+                test_snapshot("w15-market", "https://polymarket.com/event/w15"),
+                provider="polymarket",
+                event_name="W15 Maanshan: Player One vs Player Two",
+                grade=CompetitionGrade.UNKNOWN,
+                market_name="Polymarket CLOB",
+            )
+            save_snapshots(connection, [snapshot])
+            connection.close()
+            connection = connect_database(db)
+            row = connection.execute(
+                "SELECT grade, market_name FROM liquidity_snapshots WHERE source_market_id = ?",
+                ("w15-market",),
+            ).fetchone()
+            self.assertEqual(row["grade"], CompetitionGrade.ITF.value)
+            self.assertEqual(row["market_name"], "Match Winner")
+            connection.close()
+
     def test_live_adapter_requires_credentials(self):
         from tennis_betting.providers import BetfairLiquidityProvider
         with self.assertRaises(ProviderError):
@@ -126,6 +152,8 @@ class LiquidityTests(unittest.TestCase):
         provider = PolymarketPublicLiquidityProvider(max_events=1)
         provider._get_json = lambda url: (
             [{"id": "event-1", "title": "ATP Tennis",
+              "sport": {"sport": "atp", "name": "ATP Tour"},
+              "series": [{"title": "ATP"}],
               "markets": [{"id": "market-1", "conditionId": "condition-1",
               "question": "ATP Tennis", "slug": "tennis-player-a-vs-player-b",
               "startDate": "2026-09-25T12:00:00Z",
@@ -140,6 +168,30 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(snapshots[0].available_back, 10)
         self.assertEqual(snapshots[0].available_unmatched, 16)
         self.assertEqual(len(snapshots[0].raw["order_books"]), 2)
+        self.assertEqual(snapshots[0].grade, CompetitionGrade.ATP)
+        self.assertEqual(snapshots[0].market_name, "Match Winner")
+
+    def test_public_polymarket_uses_circuit_metadata_for_grade(self):
+        cases = (
+            ("M25 Sharm ElSheikh: Player A vs Player B", "ITF", CompetitionGrade.ITF),
+            ("Korea Open: Player A vs Player B", "WTA Tour", CompetitionGrade.WTA),
+            ("Chengdu Open: Player A vs Player B", "ATP Tour", CompetitionGrade.ATP),
+        )
+        for event_title, sport_name, expected_grade in cases:
+            with self.subTest(event_title=event_title):
+                provider = PolymarketPublicLiquidityProvider(max_events=1)
+                provider._get_json = lambda url, title=event_title, label=sport_name: (
+                    [{"id": "event-1", "title": title,
+                      "sport": {"name": label, "sport": label.lower().replace(" tour", "")},
+                      "series": [{"title": label.replace(" Tour", "")}],
+                      "markets": [{"id": "market-1", "question": title,
+                                   "clobTokenIds": '["token-1", "token-2"]'}]}]
+                    if "gamma-api" in url else
+                    {"bids": [{"price": "0.50", "size": "10"}],
+                     "asks": [{"price": "0.60", "size": "8"}]}
+                )
+                snapshot = provider.snapshots(datetime(2026, 9, 25, tzinfo=timezone.utc))[0]
+                self.assertEqual(snapshot.grade, expected_grade)
 
     def test_public_polymarket_paginates_events_and_selects_match_market(self):
         provider = PolymarketPublicLiquidityProvider(max_events=101)
