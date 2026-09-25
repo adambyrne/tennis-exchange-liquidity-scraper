@@ -1,6 +1,8 @@
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 from tennis_betting.classification import classify_event
@@ -14,7 +16,7 @@ from tennis_betting.providers import (
     ProviderError,
 )
 from tennis_betting.scraper import collect_once
-from tennis_betting.storage import connect_database, export_liquidity_csv
+from tennis_betting.storage import connect_database, export_liquidity_csv, save_snapshots
 
 
 class LiquidityTests(unittest.TestCase):
@@ -46,6 +48,22 @@ class LiquidityTests(unittest.TestCase):
             output = Path(directory) / "liquidity.csv"
             export_liquidity_csv(connection, output)
             self.assertIn("source_market_id", output.read_text(encoding="utf-8"))
+            connection.close()
+
+    def test_snapshot_raw_metadata_serializes_decimal_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            connection = connect_database(Path(directory) / "liquidity.sqlite3")
+            snapshot = FixtureLiquidityProvider("betfair").snapshots()[0]
+            snapshot = replace(snapshot, raw={
+                "order_book": {"price": Decimal("0.123456789"), "size": Decimal("12.50")}
+            })
+            self.assertEqual(save_snapshots(connection, [snapshot]), 1)
+            raw_json = connection.execute(
+                "SELECT raw_json FROM liquidity_snapshots WHERE source_market_id = ?",
+                (snapshot.source_market_id,),
+            ).fetchone()[0]
+            self.assertIn('"price": "0.123456789"', raw_json)
+            self.assertIn('"size": "12.50"', raw_json)
             connection.close()
 
     def test_live_adapter_requires_credentials(self):
