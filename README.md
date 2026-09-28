@@ -110,9 +110,13 @@ leader indicator. Results default to highest combined liquidity and all table
 columns are sortable by clicking their headers. Filter the results by
 tournament type; the tournament summary table updates to show each type's
 Polymarket/Kalshi liquidity-win percentages and matched count, respecting the
-active filter. Doubles teams are matched as pairs, including abbreviated
-Polymarket names, and Kalshi ATP Challenger series are included even when the
-series title omits the word "match". Use `--host` or `--port` if needed.
+active filter, with visual progress bars. Expand a match row to compare the
+available Polymarket outcome books and Kalshi player-winner markets with their
+individual displayed liquidity. Older snapshots without per-market detail
+show their stored aggregate liquidity as a fallback. Doubles teams are matched
+as pairs, including abbreviated Polymarket names, and Kalshi ATP Challenger
+series are included even when the series title omits the word "match". Use
+`--host` or `--port` if needed.
 Stop it with `Ctrl+C`.
 
 If Python reports a local certificate verification error on Windows, update the

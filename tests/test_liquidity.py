@@ -207,7 +207,8 @@ class LiquidityTests(unittest.TestCase):
               "markets": [{"id": "market-1", "conditionId": "condition-1",
               "question": "ATP Tennis", "slug": "tennis-player-a-vs-player-b",
               "startDate": "2026-09-25T12:00:00Z",
-              "clobTokenIds": '["token-1","token-2"]', "volume": "123.45"}]}]
+              "clobTokenIds": '["token-1","token-2"]',
+              "outcomes": '["Player A","Player B"]', "volume": "123.45"}]}]
             if "gamma-api" in url else
             {"bids": [{"price": "0.50", "size": "10"}],
              "asks": [{"price": "0.60", "size": "8"}]}
@@ -217,7 +218,16 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(snapshots[0].source_market_id, "market-1")
         self.assertEqual(snapshots[0].available_back, Decimal("5.00"))
         self.assertEqual(snapshots[0].available_unmatched, Decimal("4.80"))
-        self.assertEqual(len(snapshots[0].raw["order_books"]), 1)
+        self.assertEqual(len(snapshots[0].raw["order_books"]), 2)
+        self.assertEqual(len(snapshots[0].raw["ui_markets"]), 2)
+        self.assertEqual(
+            [market["selection"] for market in snapshots[0].raw["ui_markets"]],
+            ["Player A", "Player B"],
+        )
+        self.assertEqual(
+            [market["liquidity"] for market in snapshots[0].raw["ui_markets"]],
+            ["9.80", "9.80"],
+        )
         self.assertEqual(snapshots[0].grade, CompetitionGrade.ATP)
         self.assertEqual(snapshots[0].market_name, "Match Winner")
 
@@ -333,6 +343,11 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(snapshot.available_unmatched, Decimal("2.000000"))
         self.assertEqual(snapshot.grade, CompetitionGrade.ATP)
         self.assertEqual(snapshot.raw["orderbook"]["yes_dollars"][0], ["0.5000", "10.00"])
+        self.assertEqual(len(snapshot.raw["ui_markets"]), 2)
+        self.assertEqual(
+            [market["selection"] for market in snapshot.raw["ui_markets"]],
+            ["Player One wins", "Player Two wins"],
+        )
 
     def test_kalshi_discovers_challenger_series_and_collects_doubles_teams(self):
         provider = KalshiPublicLiquidityProvider(timeout_seconds=1)
@@ -388,6 +403,7 @@ class LiquidityTests(unittest.TestCase):
             "Lucas Poullain / Alexandre Reco",
             "Liam Broady / Emile Hudd",
         ))
+        self.assertEqual(len(doubles.raw["ui_markets"]), 2)
 
     def test_cross_venue_comparison_uses_conservative_match_and_depth(self):
         start = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
@@ -523,6 +539,10 @@ class LiquidityTests(unittest.TestCase):
             payload = LiquidityUI(db).results()
             self.assertEqual(len(payload["results"]), 1)
             self.assertEqual(payload["results"][0]["more_liquid"], "Polymarket")
+            comparison = payload["results"][0]
+            self.assertEqual(comparison["id"], "pm-event|k-event")
+            self.assertEqual(comparison["markets"]["polymarket"][0]["liquidity"], "9.80")
+            self.assertEqual(comparison["markets"]["kalshi"][0]["liquidity"], "7.00")
             self.assertEqual(payload["distribution"], [{
                 "tournament_type": "unknown",
                 "polymarket_percent": "100%",
@@ -542,6 +562,11 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn("selectedGrade===\"all\"", HTML)
         self.assertIn('id="distribution"', HTML)
         self.assertIn("renderDistribution()", HTML)
+        self.assertIn("expandedMatches=new Set()", HTML)
+        self.assertIn('data-expand="${esc(r.id)}"', HTML)
+        self.assertIn("marketPanel(\"Polymarket\"", HTML)
+        self.assertIn("marketPanel(\"Kalshi\"", HTML)
+        self.assertIn("mini-bar", HTML)
 
     def test_ui_liquidity_distribution_counts_ties_in_denominator(self):
         from tennis_betting.ui import _liquidity_distribution

@@ -142,10 +142,9 @@ class PolymarketPublicLiquidityProvider:
         if not isinstance(token_ids, list) or not token_ids:
             return None
         books: list[dict] = []
-        # The first outcome's bids and asks provide the two-sided view; fetching
-        # the complementary outcome's book repeats a network request and isn't
-        # used in the normalized liquidity totals.
-        for token_id in token_ids[:1]:
+        loaded_token_ids: list[str] = []
+        loaded_token_indices: list[int] = []
+        for index, token_id in enumerate(token_ids[:2]):
             try:
                 book = self._get_json(
                     f"{self.clob_endpoint}?{urllib.parse.urlencode({'token_id': token_id})}"
@@ -154,6 +153,8 @@ class PolymarketPublicLiquidityProvider:
                 continue
             if isinstance(book, dict):
                 books.append(book)
+                loaded_token_ids.append(str(token_id))
+                loaded_token_indices.append(index)
         if not books:
             return None
         # One binary outcome's bids and asks represent both sides of this market.
@@ -161,6 +162,34 @@ class PolymarketPublicLiquidityProvider:
         asks = books[0].get("asks", [])
         bid_liquidity = sum(Decimal(str(item["price"])) * Decimal(str(item["size"])) for item in bids)
         ask_liquidity = sum(Decimal(str(item["price"])) * Decimal(str(item["size"])) for item in asks)
+        outcomes = market.get("outcomes", [])
+        try:
+            outcomes = json.loads(outcomes) if isinstance(outcomes, str) else outcomes
+        except ValueError:
+            outcomes = []
+        if not isinstance(outcomes, list):
+            outcomes = []
+        ui_markets = []
+        for source_index, (token_id, book) in enumerate(zip(loaded_token_ids, books)):
+            book_bids = book.get("bids", [])
+            book_asks = book.get("asks", [])
+            depth = sum(
+                Decimal(str(level["price"])) * Decimal(str(level["size"]))
+                for level in [*book_bids, *book_asks]
+            )
+            outcome_index = loaded_token_indices[source_index]
+            selection = (
+                str(outcomes[outcome_index])
+                if outcome_index < len(outcomes)
+                else f"Outcome {outcome_index + 1}"
+            )
+            ui_markets.append({
+                "name": str(market.get("question") or event_name),
+                "selection": selection,
+                "liquidity": str(depth),
+                "currency": "USDC",
+                "source_id": str(token_id),
+            })
         market = {
             **market,
             "event_id": event.get("id"),
@@ -169,7 +198,7 @@ class PolymarketPublicLiquidityProvider:
             "event_sport": event.get("sport"),
             "event_series": event.get("series"),
         }
-        raw = {"market": market, "order_books": books}
+        raw = {"market": market, "order_books": books, "ui_markets": ui_markets}
         sport = event.get("sport")
         sport_names = [
             sport.get("name", ""), sport.get("sport", ""),
@@ -358,16 +387,41 @@ class KalshiPublicLiquidityProvider:
         market_ticker = str(market.get("ticker") or "")
         if not market_ticker:
             return None
-        book_response = self._get_json(
-            f"markets/{urllib.parse.quote(market_ticker, safe='')}/orderbook"
+        market_books: list[tuple[dict, dict]] = []
+        for winner_market in winner_markets:
+            ticker = str(winner_market.get("ticker") or "")
+            if not ticker:
+                continue
+            book_response = self._get_json(
+                f"markets/{urllib.parse.quote(ticker, safe='')}/orderbook"
+            )
+            if not isinstance(book_response, dict):
+                raise ProviderError(f"Kalshi returned invalid order book for market {ticker}")
+            orderbook_item = book_response.get("orderbook_fp", {})
+            if not isinstance(orderbook_item, dict):
+                raise ProviderError(f"Kalshi returned invalid order book for market {ticker}")
+            market_books.append((winner_market, orderbook_item))
+        if not market_books:
+            return None
+        _, orderbook = next(
+            (item for item in market_books if item[0] is market),
+            market_books[0],
         )
-        if not isinstance(book_response, dict):
-            raise ProviderError(f"Kalshi returned invalid order book for market {market_ticker}")
-        orderbook = book_response.get("orderbook_fp", {})
-        if not isinstance(orderbook, dict):
-            raise ProviderError(f"Kalshi returned invalid order book for market {market_ticker}")
         yes_liquidity = self._side_notional(orderbook.get("yes_dollars"))
         no_liquidity = self._side_notional(orderbook.get("no_dollars"))
+        ui_markets = [
+            {
+                "name": str(winner_market.get("title") or "Match Winner"),
+                "selection": str(winner_market.get("yes_sub_title") or winner_market.get("title") or ""),
+                "liquidity": str(
+                    self._side_notional(book.get("yes_dollars"))
+                    + self._side_notional(book.get("no_dollars"))
+                ),
+                "currency": "USD",
+                "source_id": str(winner_market.get("ticker") or ""),
+            }
+            for winner_market, book in market_books
+        ]
         grade = classify_event(f"{series_title} {event.get('title', '')}")
         return normalize_snapshot({
             "event_id": event_ticker,
@@ -387,6 +441,7 @@ class KalshiPublicLiquidityProvider:
                 "event": event,
                 "market": market,
                 "orderbook": orderbook,
+                "ui_markets": ui_markets,
             },
         }, self.name, observed)
 

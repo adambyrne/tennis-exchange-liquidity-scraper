@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .matching import LiquidityComparison
+from .models import LiquiditySnapshot
 from .providers import KalshiPublicLiquidityProvider, PolymarketPublicLiquidityProvider
 from .scraper import collect_once
 from .storage import connect_database, load_latest_comparisons
@@ -26,9 +27,12 @@ h1{font-size:clamp(1.5rem,3vw,2.25rem);margin:0 0 6px}p{color:#657089;margin:0}
 button{border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;padding:12px 18px;cursor:pointer}
 button:disabled{opacity:.6;cursor:wait}.meta{display:flex;gap:16px;flex-wrap:wrap;margin:18px 0}
 .card{background:#fff;border:1px solid #e3e8f1;border-radius:14px;box-shadow:0 5px 18px #14213d0b;overflow:hidden}
-.actions{display:flex;align-items:center;gap:12px}.distribution{background:#fff;border:1px solid #e3e8f1;border-radius:10px;padding:8px 10px;max-width:100%;overflow-x:auto}
-.distribution table{border-collapse:collapse;min-width:310px;width:auto}.distribution th,.distribution td{padding:5px 8px;border-bottom:1px solid #edf0f5;font-size:.72rem;white-space:nowrap}
-.distribution th{font-size:.65rem}.distribution td.num{text-align:right;font-variant-numeric:tabular-nums}
+.actions{display:flex;align-items:center;gap:12px}.distribution{background:linear-gradient(135deg,#fff 35%,#f0f5ff);border:1px solid #dfe7f5;border-radius:14px;padding:10px 12px;max-width:100%;overflow-x:auto;box-shadow:0 8px 22px #18376010}
+.distribution table{border-collapse:collapse;min-width:340px;width:auto}.distribution th,.distribution td{padding:6px 8px;border-bottom:1px solid #e9eef7;font-size:.72rem;white-space:nowrap}
+.distribution th{font-size:.62rem;letter-spacing:.06em}.distribution td.num{text-align:right;font-variant-numeric:tabular-nums}
+.grade-chip{display:inline-block;padding:3px 7px;border-radius:99px;background:#edf2ff;color:#344f9a;font-size:.68rem;font-weight:700}
+.share-cell{display:flex;align-items:center;justify-content:flex-end;gap:6px}.mini-bar{display:inline-block;width:38px;height:5px;background:#e8edf5;border-radius:10px;overflow:hidden}
+.mini-bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#60a5fa,#2563eb)}.mini-bar.kalshi i{background:linear-gradient(90deg,#fbbf24,#d97706)}
 .filter{display:flex;align-items:center;gap:8px;margin:18px 0;color:#657089;font-size:.9rem}
 select{border:1px solid #d7deea;border-radius:8px;background:#fff;padding:8px 30px 8px 10px;color:#172033}
 .notice{padding:12px 16px;margin-bottom:16px;border-radius:10px;display:none}.notice.show{display:block}
@@ -41,6 +45,12 @@ th button:hover,th button[aria-sort="ascending"],th button[aria-sort="descending
 td{font-variant-numeric:tabular-nums}.match{font-weight:700}.sub{font-size:.8rem;color:#7b879d;margin-top:4px}
 .winner{font-weight:700}.pm{color:#2563eb}.ka{color:#b45309}.tie{color:#657089}.empty{text-align:center;color:#657089;padding:40px}
 .badge{display:inline-block;border-radius:99px;padding:4px 9px;font-size:.78rem;background:#eef2ff}
+.expand-button{width:28px;height:28px;padding:0;margin-right:8px;border-radius:8px;background:#eef2ff;color:#334b82;font-size:1rem;line-height:1}
+.expand-button[aria-expanded="true"]{transform:rotate(90deg);background:#dbe7ff}.detail-cell{padding:16px 24px!important;background:#f8faff}
+.market-panels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.market-panel{border:1px solid #e1e8f3;background:white;border-radius:12px;padding:14px}
+.market-panel h3{margin:0 0 10px;font-size:.9rem}.market-item{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid #edf0f5}
+.market-name{font-weight:600}.market-selection{display:block;color:#718096;font-size:.78rem;margin-top:3px}.market-amount{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
+@media(max-width:720px){.market-panels{grid-template-columns:1fr}.distribution{width:100%}}
 @media(max-width:650px){.shell{padding:22px 12px}header{align-items:flex-start;flex-direction:column}.actions{width:100%;align-items:stretch;flex-direction:column}.distribution{justify-content:space-around}button#run{width:100%}}
 </style></head>
 <body><main class="shell"><header><div><h1>Tennis liquidity</h1><p>Current displayed order-book depth across Polymarket and Kalshi.</p></div>
@@ -61,7 +71,7 @@ td{font-variant-numeric:tabular-nums}.match{font-weight:700}.sub{font-size:.8rem
 <script>
 const money = value => new Intl.NumberFormat(undefined,{style:"currency",currency:"USD",maximumFractionDigits:2}).format(Number(value)||0);
 const esc = value => String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-let currentResults=[], sortColumn="total", sortDirection="descending", selectedGrade="all";
+let currentResults=[], sortColumn="total", sortDirection="descending", selectedGrade="all", expandedMatches=new Set();
 function show(message, kind){const n=document.getElementById("notice");n.textContent=message;n.className="notice show "+kind}
 const gradeLabel=grade=>({grand_slam:"Grand Slam",atp:"ATP",wta:"WTA",atp_challenger:"ATP Challenger",itf:"ITF",utr:"UTR",unknown:"Unknown"}[grade]||grade.toUpperCase());
 function updateSortIndicators(){document.querySelectorAll("th button[data-sort]").forEach(button=>{const active=button.dataset.sort===sortColumn;const defaultTotal=sortColumn==="total"&&button.dataset.sort==="match";button.setAttribute("aria-sort",defaultTotal?"other":active?sortDirection:"none");const indicator=button.querySelector(".sort-indicator");indicator.textContent=defaultTotal?(sortDirection==="ascending"?"Σ↑":"Σ↓"):active?(sortDirection==="ascending"?"↑":"↓"):"";indicator.title=defaultTotal?"Sorted by combined liquidity":"";button.setAttribute("aria-label",defaultTotal?"Match; sorted by combined liquidity descending":button.textContent.trim())})}
@@ -73,14 +83,18 @@ function sortedResults(){const sign=sortDirection==="ascending"?1:-1;return [...
  else if(sortColumn==="difference"){left=Number(a.difference);right=Number(b.difference)}
  else {left=a.competitors.toLocaleLowerCase();right=b.competitors.toLocaleLowerCase()}
  const result=typeof left==="string"?left.localeCompare(right):left-right;return result===0?a.competitors.localeCompare(b.competitors):result*sign})}
+function marketPanel(title,markets,venue){const body=markets.length?markets.map(m=>`<div class="market-item"><span><span class="market-name">${esc(m.name||"Match Winner")}</span>${m.selection?`<span class="market-selection">${esc(m.selection)}</span>`:""}</span><span class="market-amount">${money(m.liquidity)} ${esc(m.currency||"USD")}</span></div>`).join(""):'<div class="sub">No market details available in this snapshot.</div>';return `<section class="market-panel"><h3 class="${venue}">${esc(title)}</h3>${body}</section>`}
 function renderRows(){const results=filteredResults(),rows=document.getElementById("rows");document.getElementById("count").textContent=results.length;if(!results.length){rows.innerHTML='<tr><td colspan="4" class="empty">No conservatively matched fixtures found for this tournament type.</td></tr>';return}
- rows.innerHTML=sortedResults().map(r=>{const pm=Number(r.polymarket_liquidity),ka=Number(r.kalshi_liquidity),winner=r.more_liquid==="Tie"?"Tie":r.more_liquid+" higher";const cls=r.more_liquid==="Polymarket"?"pm":r.more_liquid==="Kalshi"?"ka":"tie";
- return `<tr><td><div class="match">${esc(r.competitors)}</div><div class="sub">${esc(r.grade)} · ${esc(r.phase)}</div></td><td class="${r.more_liquid==="Polymarket"?"winner":""}">${money(pm)}</td><td class="${r.more_liquid==="Kalshi"?"winner":""}">${money(ka)}</td><td class="${cls}">${money(r.difference)} <span class="badge">${esc(winner)}</span></td></tr>`}).join("")}
+ rows.innerHTML=sortedResults().map(r=>{const pm=Number(r.polymarket_liquidity),ka=Number(r.kalshi_liquidity),winner=r.more_liquid==="Tie"?"Tie":r.more_liquid+" higher";const cls=r.more_liquid==="Polymarket"?"pm":r.more_liquid==="Kalshi"?"ka":"tie",expanded=expandedMatches.has(r.id);
+ const summary=`<tr><td><button class="expand-button" data-expand="${esc(r.id)}" aria-expanded="${expanded}" aria-label="${expanded?"Collapse":"Expand"} market details">›</button><span class="match">${esc(r.competitors)}</span><div class="sub">${esc(gradeLabel(r.grade))} · ${esc(r.phase)}</div></td><td class="${r.more_liquid==="Polymarket"?"winner":""}">${money(pm)}</td><td class="${r.more_liquid==="Kalshi"?"winner":""}">${money(ka)}</td><td class="${cls}">${money(r.difference)} <span class="badge">${esc(winner)}</span></td></tr>`;
+ const details=`<tr class="details-row" data-detail-for="${esc(r.id)}" ${expanded?"":"hidden"}><td colspan="4" class="detail-cell"><div class="market-panels">${marketPanel("Polymarket",r.markets.polymarket,"pm")}${marketPanel("Kalshi",r.markets.kalshi,"ka")}</div></td></tr>`;
+ return summary+details}).join("")}
 function renderDistribution(){const grouped=new Map();for(const result of filteredResults()){const grade=result.grade||"unknown";if(!grouped.has(grade))grouped.set(grade,{total:0,pm:0,kalshi:0});const row=grouped.get(grade);row.total++;if(result.more_liquid==="Polymarket")row.pm++;if(result.more_liquid==="Kalshi")row.kalshi++}
  const body=document.getElementById("distribution");if(!grouped.size){body.innerHTML='<tr><td colspan="4">No matched data</td></tr>';return}
- body.innerHTML=[...grouped.entries()].sort((a,b)=>gradeLabel(a[0]).localeCompare(gradeLabel(b[0]))).map(([grade,row])=>`<tr><td>${esc(gradeLabel(grade))}</td><td class="num">${Math.round(row.pm/row.total*100)}%</td><td class="num">${Math.round(row.kalshi/row.total*100)}%</td><td class="num">${row.total}</td></tr>`).join("")}
+ body.innerHTML=[...grouped.entries()].sort((a,b)=>gradeLabel(a[0]).localeCompare(gradeLabel(b[0]))).map(([grade,row])=>{const pm=Math.round(row.pm/row.total*100),kalshi=Math.round(row.kalshi/row.total*100);return `<tr><td><span class="grade-chip">${esc(gradeLabel(grade))}</span></td><td><div class="share-cell">${pm}%<span class="mini-bar"><i style="width:${pm}%"></i></span></div></td><td><div class="share-cell">${kalshi}%<span class="mini-bar kalshi"><i style="width:${kalshi}%"></i></span></div></td><td class="num">${row.total}</td></tr>`}).join("")}
 function render(data){currentResults=data.results||[];document.getElementById("updated").textContent=data.updated_at?new Date(data.updated_at).toLocaleString():"-";const filter=document.getElementById("tournament-filter"),previous=selectedGrade,grades=[...new Set(currentResults.map(result=>result.grade||"unknown"))].sort();filter.innerHTML='<option value="all">All tournaments</option>'+grades.map(grade=>`<option value="${esc(grade)}">${esc(gradeLabel(grade))}</option>`).join("");selectedGrade=grades.includes(previous)?previous:"all";filter.value=selectedGrade;updateSortIndicators();renderRows();renderDistribution()}
 document.querySelectorAll("th button[data-sort]").forEach(button=>button.addEventListener("click",()=>{if(sortColumn===button.dataset.sort)sortDirection=sortDirection==="ascending"?"descending":"ascending";else{sortColumn=button.dataset.sort;sortDirection="ascending"}updateSortIndicators();renderRows()}));updateSortIndicators();
+document.getElementById("rows").addEventListener("click",event=>{const button=event.target.closest("button[data-expand]");if(!button)return;const id=button.dataset.expand;if(expandedMatches.has(id))expandedMatches.delete(id);else expandedMatches.add(id);const details=document.querySelector(`[data-detail-for="${CSS.escape(id)}"]`);if(details)details.hidden=!expandedMatches.has(id);button.setAttribute("aria-expanded",String(expandedMatches.has(id)));button.setAttribute("aria-label",expandedMatches.has(id)?"Collapse market details":"Expand market details")});
 document.getElementById("tournament-filter").addEventListener("change",event=>{selectedGrade=event.target.value;renderRows();renderDistribution()});
 async function load(){const response=await fetch("/api/results");if(response.ok)render(await response.json())}
 async function runScraper(){const button=document.getElementById("run");button.disabled=true;button.textContent="Refreshing…";show("Collecting current markets from Polymarket and Kalshi…","success");
@@ -90,7 +104,29 @@ load();
 
 
 def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
+    def market_details(
+        snapshot: LiquiditySnapshot, visible_liquidity: Any,
+    ) -> list[dict[str, str]]:
+        details = snapshot.raw.get("ui_markets")
+        if isinstance(details, list) and details:
+            return [
+                {
+                    "name": str(item.get("name") or snapshot.market_name),
+                    "selection": str(item.get("selection") or ""),
+                    "liquidity": str(item.get("liquidity") or "0"),
+                    "currency": str(item.get("currency") or snapshot.currency),
+                }
+                for item in details if isinstance(item, dict)
+            ]
+        return [{
+            "name": snapshot.market_name,
+            "selection": "",
+            "liquidity": str(visible_liquidity),
+            "currency": snapshot.currency,
+        }]
+
     return {
+        "id": f"{comparison.polymarket.source_event_id}|{comparison.kalshi.source_event_id}",
         "competitors": " vs ".join(comparison.polymarket.competitor_names),
         "grade": (
             comparison.polymarket.grade
@@ -103,6 +139,10 @@ def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
         "difference": str(comparison.difference),
         "more_liquid": comparison.more_liquid,
         "match_confidence": comparison.confidence,
+        "markets": {
+            "polymarket": market_details(comparison.polymarket, comparison.polymarket_liquidity),
+            "kalshi": market_details(comparison.kalshi, comparison.kalshi_liquidity),
+        },
     }
 
 
