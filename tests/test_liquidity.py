@@ -22,7 +22,7 @@ from tennis_betting.scraper import collect_once
 from tennis_betting.storage import (
     connect_database, export_liquidity_csv, save_snapshots,
 )
-from tennis_betting.ui import LiquidityUI
+from tennis_betting.ui import HTML, LiquidityUI
 
 
 def test_snapshot(source_market_id="test-market", source_url=None):
@@ -443,6 +443,44 @@ class LiquidityTests(unittest.TestCase):
             payload = LiquidityUI(db).results()
             self.assertEqual(len(payload["results"]), 1)
             self.assertEqual(payload["results"][0]["more_liquid"], "Polymarket")
+            self.assertEqual(payload["distribution"], {
+                "polymarket_percent": "100%", "kalshi_percent": "0%",
+            })
+
+    def test_ui_supports_default_and_clickable_column_sorting(self):
+        self.assertIn('sortColumn="total", sortDirection="descending"', HTML)
+        self.assertIn('data-sort="match"', HTML)
+        self.assertIn('data-sort="polymarket"', HTML)
+        self.assertIn('data-sort="kalshi"', HTML)
+        self.assertIn('data-sort="difference"', HTML)
+        self.assertIn('sortDirection==="ascending"?"descending":"ascending"', HTML)
+        self.assertIn("Σ↓", HTML)
+
+    def test_ui_liquidity_distribution_counts_ties_in_denominator(self):
+        from tennis_betting.ui import _liquidity_distribution
+
+        start = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
+        def snapshot(provider, market_id, amount, competitors):
+            return normalize_snapshot({
+                "event_id": market_id, "market_id": market_id,
+                "event_name": " vs ".join(competitors),
+                "competitors": competitors,
+                "start_time": start,
+                "available_back": amount,
+            }, provider, start)
+
+        comparisons = compare_liquidity_snapshots([
+            snapshot("polymarket", "pm-win", "20", ["Player One", "Player Two"]),
+            snapshot("kalshi", "k-pm-win", "10", ["Player Two", "Player One"]),
+            snapshot("polymarket", "pm-kalshi", "5", ["Player Three", "Player Four"]),
+            snapshot("kalshi", "k-win", "15", ["Player Four", "Player Three"]),
+            snapshot("polymarket", "pm-tie", "10", ["Player Five", "Player Six"]),
+            snapshot("kalshi", "k-tie", "10", ["Player Six", "Player Five"]),
+        ])
+        self.assertEqual(len(comparisons), 3)
+        self.assertEqual(_liquidity_distribution(comparisons), {
+            "polymarket_percent": "33%", "kalshi_percent": "33%",
+        })
 
 
 if __name__ == "__main__":
