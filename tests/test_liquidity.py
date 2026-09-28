@@ -9,16 +9,19 @@ from pathlib import Path
 
 from tennis_betting.cli import build_parser, main
 from tennis_betting.classification import classify_event
-from tennis_betting.matching import link_match
+from tennis_betting.matching import compare_liquidity_snapshots, link_match
 from tennis_betting.models import CompetitionGrade, Phase
 from tennis_betting.normalization import normalize_snapshot
 from tennis_betting.providers import (
+    KalshiPublicLiquidityProvider,
     PolymarketNotFoundError,
     PolymarketPublicLiquidityProvider,
     ProviderError,
 )
 from tennis_betting.scraper import collect_once
-from tennis_betting.storage import connect_database, export_liquidity_csv, save_snapshots
+from tennis_betting.storage import (
+    connect_database, export_liquidity_csv, save_snapshots,
+)
 
 
 def test_snapshot(source_market_id="test-market", source_url=None):
@@ -41,9 +44,9 @@ class TestSnapshotProvider:
 
 
 class LiquidityTests(unittest.TestCase):
-    def test_scrape_defaults_to_live_polymarket_without_sample_mode(self):
+    def test_scrape_defaults_to_both_live_providers(self):
         args = build_parser().parse_args(["scrape", "--once"])
-        self.assertEqual(args.provider, "polymarket")
+        self.assertEqual(args.provider, "all")
 
     def test_classification_and_normalization(self):
         now = datetime.now(timezone.utc)
@@ -165,8 +168,8 @@ class LiquidityTests(unittest.TestCase):
         snapshots = provider.snapshots(datetime(2026, 9, 25, tzinfo=timezone.utc))
         self.assertEqual(len(snapshots), 1)
         self.assertEqual(snapshots[0].source_market_id, "market-1")
-        self.assertEqual(snapshots[0].available_back, 10)
-        self.assertEqual(snapshots[0].available_unmatched, 16)
+        self.assertEqual(snapshots[0].available_back, Decimal("5.00"))
+        self.assertEqual(snapshots[0].available_unmatched, Decimal("4.80"))
         self.assertEqual(len(snapshots[0].raw["order_books"]), 2)
         self.assertEqual(snapshots[0].grade, CompetitionGrade.ATP)
         self.assertEqual(snapshots[0].market_name, "Match Winner")
@@ -224,7 +227,7 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(len(gamma_calls), 2)
         self.assertIn("offset=100", gamma_calls[1])
         self.assertEqual([snapshot.source_market_id for snapshot in snapshots], ["match-market"])
-        self.assertEqual(snapshots[0].competitor_names, ("ATP Match: Player A", "Player B"))
+        self.assertEqual(snapshots[0].competitor_names, ("Player A", "Player B"))
 
     def test_public_polymarket_skips_markets_without_order_books(self):
         provider = PolymarketPublicLiquidityProvider(max_events=2)
@@ -248,6 +251,123 @@ class LiquidityTests(unittest.TestCase):
         snapshots = provider.snapshots(datetime(2026, 9, 25, tzinfo=timezone.utc))
         self.assertEqual(len(snapshots), 1)
         self.assertEqual(snapshots[0].source_market_id, "has-book")
+
+    def test_kalshi_public_provider_parses_match_market_orderbook(self):
+        provider = KalshiPublicLiquidityProvider(max_events=1)
+
+        def get_json(path, params=None):
+            if path == "series":
+                return {"series": [
+                    {"ticker": "KXTTMATCH", "title": "Table Tennis Match", "tags": ["Table Tennis"]},
+                    {"ticker": "KXATPMATCH", "title": "ATP Tennis Match", "tags": ["Tennis"]},
+                ]}
+            if path == "events":
+                return {"events": [{
+                    "event_ticker": "KXATPMATCH-26SEP25ONE TWO",
+                    "title": "Player One vs Player Two",
+                    "markets": [
+                        {"ticker": "winner-two", "title": "Player Two wins", "open_time": "2026-09-25T12:00:00Z"},
+                        {"ticker": "winner-one", "title": "Player One wins", "open_time": "2026-09-25T12:00:00Z"},
+                    ],
+                }], "cursor": ""}
+            return {"orderbook_fp": {
+                "yes_dollars": [["0.5000", "10.00"]],
+                "no_dollars": [["0.4000", "5.00"]],
+            }}
+
+        provider._get_json = get_json
+        snapshots = provider.snapshots(datetime(2026, 9, 25, 11, tzinfo=timezone.utc))
+        self.assertEqual(len(snapshots), 1)
+        snapshot = snapshots[0]
+        self.assertEqual(snapshot.provider, "kalshi")
+        self.assertEqual(snapshot.source_market_id, "winner-one")
+        self.assertEqual(snapshot.competitor_names, ("Player Two", "Player One"))
+        self.assertEqual(snapshot.available_back, Decimal("5.000000"))
+        self.assertEqual(snapshot.available_unmatched, Decimal("2.000000"))
+        self.assertEqual(snapshot.grade, CompetitionGrade.ATP)
+        self.assertEqual(snapshot.raw["orderbook"]["yes_dollars"][0], ["0.5000", "10.00"])
+
+    def test_cross_venue_comparison_uses_conservative_match_and_depth(self):
+        start = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
+        polymarket = replace(
+            normalize_snapshot({
+                "event_id": "pm-event", "market_id": "pm-market",
+                "event_name": "ATP: Player One vs Player Two",
+                "competitors": ["Player One", "Player Two"], "start_time": start,
+            }, "polymarket", start),
+            raw={"order_books": [{
+                "bids": [{"price": "0.50", "size": "10"}],
+                "asks": [{"price": "0.60", "size": "8"}],
+            }]},
+        )
+        kalshi = replace(
+            normalize_snapshot({
+                "event_id": "k-event", "market_id": "k-market",
+                "event_name": "Player Two vs Player One",
+                "competitors": ["Player Two", "Player One"], "start_time": start,
+                "available_back": "5", "available_unmatched": "2",
+            }, "kalshi", start),
+            raw={"orderbook": {
+                "yes_dollars": [["0.50", "10"]],
+                "no_dollars": [["0.40", "5"]],
+            }},
+        )
+        comparison, = compare_liquidity_snapshots([polymarket, kalshi])
+        self.assertEqual(comparison.polymarket_liquidity, Decimal("9.80"))
+        self.assertEqual(comparison.kalshi_liquidity, Decimal("7.00"))
+        self.assertEqual(comparison.more_liquid, "Polymarket")
+        self.assertEqual(comparison.confidence, 1.0)
+        outside_window = replace(kalshi, start_time=start.replace(day=27))
+        self.assertEqual(compare_liquidity_snapshots([polymarket, outside_window]), [])
+
+    def test_cross_venue_comparison_rejects_ambiguous_matches(self):
+        start = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
+        base = normalize_snapshot({
+            "event_id": "event", "market_id": "market",
+            "event_name": "Player One vs Player Two",
+            "competitors": ["Player One", "Player Two"], "start_time": start,
+        }, "polymarket", start)
+        first = replace(base, raw={})
+        second = replace(base, provider="kalshi", source_market_id="kalshi-1")
+        duplicate = replace(base, provider="kalshi", source_market_id="kalshi-2")
+        self.assertEqual(compare_liquidity_snapshots([first, second, duplicate]), [])
+
+    def test_comparison_command_exports_only_matched_latest_markets(self):
+        start = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
+        polymarket = replace(
+            normalize_snapshot({
+                "event_id": "pm-event", "market_id": "pm-market",
+                "event_name": "Player One vs Player Two",
+                "competitors": ["Player One", "Player Two"], "start_time": start,
+            }, "polymarket", start),
+            raw={"order_books": [{
+                "bids": [{"price": "0.50", "size": "10"}],
+                "asks": [{"price": "0.60", "size": "8"}],
+            }]},
+        )
+        kalshi = replace(
+            normalize_snapshot({
+                "event_id": "k-event", "market_id": "k-market",
+                "event_name": "Player Two vs Player One",
+                "competitors": ["Player Two", "Player One"], "start_time": start,
+            }, "kalshi", start),
+            raw={"orderbook": {
+                "yes_dollars": [["0.50", "10"]],
+                "no_dollars": [["0.40", "5"]],
+            }},
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            connection = connect_database(Path(directory) / "liquidity.sqlite3")
+            save_snapshots(connection, [polymarket, kalshi])
+            connection.close()
+            output = Path(directory) / "comparison.csv"
+            captured = StringIO()
+            with redirect_stdout(captured):
+                main(["compare-liquidity", "--db", str(Path(directory) / "liquidity.sqlite3"), str(output)])
+            self.assertIn(f"Exported 1 matched comparisons to {output}", captured.getvalue())
+            text = output.read_text(encoding="utf-8")
+            self.assertIn("more_liquid", text)
+            self.assertIn("Polymarket", text)
 
 
 if __name__ == "__main__":

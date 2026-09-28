@@ -10,7 +10,8 @@ from enum import Enum
 from pathlib import Path
 
 from .classification import classify_event
-from .models import BetType, LiquiditySnapshot, Selection, Slip
+from .matching import compare_liquidity_snapshots
+from .models import BetType, CompetitionGrade, LiquiditySnapshot, Phase, Selection, Slip
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS liquidity_snapshots (
@@ -83,6 +84,66 @@ def export_liquidity_csv(connection: sqlite3.Connection, path: str | Path) -> in
         writer.writerow([column[0] for column in cursor.description])
         writer.writerows(tuple(row) for row in rows)
     return len(rows)
+
+
+def export_liquidity_comparison_csv(connection: sqlite3.Connection, path: str | Path) -> int:
+    rows = connection.execute(
+        """SELECT snapshot.* FROM liquidity_snapshots AS snapshot
+        WHERE snapshot.provider IN ('polymarket', 'kalshi')
+        AND snapshot.observed_at = (
+            SELECT MAX(latest.observed_at) FROM liquidity_snapshots AS latest
+            WHERE latest.provider = snapshot.provider
+            AND latest.source_market_id = snapshot.source_market_id
+        )
+        ORDER BY snapshot.provider, snapshot.start_time"""
+    ).fetchall()
+    snapshots = [
+        LiquiditySnapshot(
+            provider=row["provider"],
+            source_event_id=row["source_event_id"],
+            source_market_id=row["source_market_id"],
+            event_name=row["event_name"],
+            market_name=row["market_name"],
+            competitor_names=tuple(json.loads(row["competitor_names"])),
+            start_time=datetime.fromisoformat(row["start_time"].replace("Z", "+00:00")),
+            observed_at=datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00")),
+            grade=CompetitionGrade(row["grade"]),
+            phase=Phase(row["phase"]),
+            available_back=Decimal(str(row["available_back"])),
+            available_unmatched=Decimal(str(row["available_unmatched"])),
+            matched_volume=Decimal(str(row["matched_volume"])),
+            currency=row["currency"],
+            source_url=row["source_url"],
+            match_key=row["match_key"],
+            match_confidence=Decimal(str(row["match_confidence"])) if row["match_confidence"] is not None else None,
+            raw=json.loads(row["raw_json"]),
+        )
+        for row in rows
+    ]
+    comparisons = compare_liquidity_snapshots(snapshots)
+    fieldnames = [
+        "competitors", "polymarket_event", "kalshi_event",
+        "polymarket_start_time", "kalshi_start_time",
+        "polymarket_visible_liquidity_usd", "kalshi_visible_liquidity_usd",
+        "more_liquid", "difference_usd", "match_confidence",
+    ]
+    with Path(path).open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for comparison in comparisons:
+            writer.writerow({
+                "competitors": " vs ".join(comparison.polymarket.competitor_names),
+                "polymarket_event": comparison.polymarket.event_name,
+                "kalshi_event": comparison.kalshi.event_name,
+                "polymarket_start_time": comparison.polymarket.start_time.isoformat(),
+                "kalshi_start_time": comparison.kalshi.start_time.isoformat(),
+                "polymarket_visible_liquidity_usd": comparison.polymarket_liquidity,
+                "kalshi_visible_liquidity_usd": comparison.kalshi_liquidity,
+                "more_liquid": comparison.more_liquid,
+                "difference_usd": comparison.difference,
+                "match_confidence": f"{comparison.confidence:.3f}",
+            })
+    return len(comparisons)
 
 
 def export_liquidity_parquet(connection: sqlite3.Connection, path: str | Path) -> int:

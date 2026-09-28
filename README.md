@@ -37,22 +37,25 @@ dependency-free and suitable for embedding.
 
 ## Exchange liquidity scraper
 
-The scraper collects live public Polymarket tennis match markets without
-accounts or credentials:
+The scraper collects live public tennis match markets from Polymarket and
+Kalshi without accounts or credentials:
 
 ```bash
 python main.py scrape --once --db liquidity.sqlite3
 python main.py export-liquidity --db liquidity.sqlite3 liquidity.csv
+python main.py compare-liquidity --db liquidity.sqlite3 tennis-comparison.csv
 ```
 
-The collector pages through active tennis events and records the match-winner
-market for each event, rather than stopping after the first 100 child markets
-or collecting futures and side markets. It reads both outcome order books;
-active events without an available CLOB order book are skipped. Each snapshot
-preserves provider/event/market IDs, competitors, start
-and observation timestamps, automated competition grade, pre-match/in-play
-phase, available back and unmatched liquidity, matched volume, currency, raw
-provenance, and optional cross-venue match metadata. SQLite is the local-first
+The default `all` provider collects from both venues. Select one explicitly
+with `--provider polymarket` or `--provider kalshi`; use `--max-events N` to
+cap a collection run while testing. Polymarket pages active tennis events and
+reads match-winner CLOB books. Kalshi discovers open tennis match series and
+reads the public YES/NO order book for each event's canonical player-winner
+market. The Kalshi public market-data endpoints used here do not require API
+credentials. Neither adapter places orders. Each snapshot preserves
+provider/event/market IDs, competitors, start and observation timestamps,
+automated competition grade, pre-match/in-play phase, visible liquidity,
+matched volume, currency, and raw provenance. SQLite is the local-first
 queryable database. Parquet is available when the optional `pyarrow` package is
 installed:
 
@@ -67,15 +70,25 @@ python main.py scrape --db liquidity.sqlite3
 ```
 
 `--live` remains accepted for backwards compatibility but is no longer needed.
-Polymarket market discovery and CLOB order books are public. Previous built-in
-fixture data has been removed; when the database is opened, old rows marked
-`fixture://sample` are automatically deleted. Betfair and Kalshi live
+Previous built-in fixture data has been removed; when the database is opened,
+old rows marked `fixture://sample` are automatically deleted. Betfair live
 transport is not enabled:
 
 ```bash
-python main.py scrape --live --provider polymarket --once --db liquidity.sqlite3
-python main.py export-liquidity --db liquidity.sqlite3 polymarket.csv
+python main.py scrape --provider kalshi --once --db liquidity.sqlite3
+python main.py compare-liquidity --db liquidity.sqlite3 tennis-comparison.csv
 ```
+
+`compare-liquidity` compares the latest stored snapshot for each market and
+exports only one-to-one, unambiguous cross-venue matches. Matching uses both
+competitors (order-independent) and a 36-hour start-time window; similar names
+or ambiguous duplicate fixtures are left out rather than guessed. The
+comparison's visible-liquidity figure is gross displayed order notional:
+Polymarket uses bids plus asks from one outcome token, while Kalshi uses YES
+and NO bid levels from one player-winner market (price multiplied by contract
+quantity). This avoids counting complementary outcomes twice; it is a current
+order-book depth comparison, not traded volume, executable profit, or a
+guarantee that liquidity is available at one price.
 
 If Python reports a local certificate verification error on Windows, update the
 certificate bundle used by the adapter:
@@ -84,13 +97,11 @@ certificate bundle used by the adapter:
 python -m pip install --upgrade certifi
 ```
 
-The adapter stores each observation locally. Re-running it builds your own
-historical series; it does not fabricate past order-book data. Betfair's
-Exchange API and Kalshi's Trade
-API have different authentication, market semantics, rate limits, and terms; configure credentials
-only after reviewing the current provider documentation and terms. The adapters
-fail explicitly rather than making an unauthenticated request. The environment
-names reserved for future clients are `BETFAIR_APP_KEY` and `KALSHI_API_KEY`.
+The adapters store each observation locally. Re-running them builds your own
+historical series; they do not fabricate past order-book data. Kalshi market
+availability, API rate limits, and service access can vary by location and
+exchange policy. Betfair's Exchange API requires an authenticated client and
+is not enabled.
 
 Polymarket `grade` uses the event's official sport/series metadata, with
 tournament-name rules for ITF circuit codes such as `M25` and `W50`.
