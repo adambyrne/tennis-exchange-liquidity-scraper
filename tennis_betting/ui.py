@@ -27,11 +27,15 @@ h1{font-size:clamp(1.5rem,3vw,2.25rem);margin:0 0 6px}p{color:#657089;margin:0}
 button{border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;padding:12px 18px;cursor:pointer}
 button:disabled{opacity:.6;cursor:wait}.meta{display:flex;gap:16px;flex-wrap:wrap;margin:18px 0}
 .card{background:#fff;border:1px solid #e3e8f1;border-radius:14px;box-shadow:0 5px 18px #14213d0b;overflow:hidden}
-.actions{display:flex;align-items:center;gap:12px}.distribution{background:linear-gradient(135deg,#fff 35%,#f0f5ff);border:1px solid #dfe7f5;border-radius:14px;padding:10px 12px;max-width:100%;overflow-x:auto;box-shadow:0 8px 22px #18376010}
-.distribution table{border-collapse:collapse;min-width:340px;width:auto}.distribution th,.distribution td{padding:6px 8px;border-bottom:1px solid #e9eef7;font-size:.72rem;white-space:nowrap}
+.actions{display:flex;align-items:center;gap:12px}.summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;max-width:100%}
+.distribution{background:linear-gradient(135deg,#fff 35%,#f0f5ff);border:1px solid #dfe7f5;border-radius:14px;padding:10px 12px;max-width:100%;overflow-x:auto;box-shadow:0 8px 22px #18376010}
+.distribution table{border-collapse:collapse;min-width:280px;width:auto}.distribution th,.distribution td{padding:6px 8px;border-bottom:1px solid #e9eef7;font-size:.72rem;white-space:nowrap}
 .distribution th{font-size:.62rem;letter-spacing:.06em}.distribution td.num{text-align:right;font-variant-numeric:tabular-nums}
 .distribution tr.total-row td{border-top:2px solid #cfd9e9;font-weight:800;background:#f7f9fe}
 .unit-note{font-size:.65rem!important;margin:6px 8px 0;color:#718096!important}
+.view-toggle{display:flex;align-items:center;gap:4px;padding:4px;border:1px solid #dbe3f0;border-radius:12px;background:#eaf0f8;width:max-content;max-width:100%;margin:18px 0}
+.view-toggle button{padding:9px 14px;background:transparent;color:#53617a;border-radius:8px}
+.view-toggle button[aria-pressed="true"]{background:#fff;color:#1749a5;box-shadow:0 2px 7px #17203318}
 .grade-chip{display:inline-block;padding:3px 7px;border-radius:99px;background:#edf2ff;color:#344f9a;font-size:.68rem;font-weight:700}
 .share-cell{display:flex;align-items:center;justify-content:flex-end;gap:6px}.mini-bar{display:inline-block;width:38px;height:5px;background:#e8edf5;border-radius:10px;overflow:hidden}
 .mini-bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#60a5fa,#2563eb)}.mini-bar.kalshi i{background:linear-gradient(90deg,#fbbf24,#d97706)}
@@ -52,57 +56,78 @@ td{font-variant-numeric:tabular-nums}.match{font-weight:700}.sub{font-size:.8rem
 .market-panels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.market-panel{border:1px solid #e1e8f3;background:white;border-radius:12px;padding:14px}
 .market-panel h3{margin:0 0 10px;font-size:.9rem}.market-item{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid #edf0f5}
 .market-name{font-weight:600}.market-selection{display:block;color:#718096;font-size:.78rem;margin-top:3px}.market-amount{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
-@media(max-width:720px){.market-panels{grid-template-columns:1fr}.distribution{width:100%}}
-@media(max-width:650px){.shell{padding:22px 12px}header{align-items:flex-start;flex-direction:column}.actions{width:100%;align-items:stretch;flex-direction:column}.distribution{justify-content:space-around}button#run{width:100%}}
+@media(max-width:900px){header{align-items:flex-start;flex-direction:column}.actions{width:100%;align-items:stretch;flex-direction:column}.summary-grid{width:100%}}
+@media(max-width:720px){.market-panels{grid-template-columns:1fr}.summary-grid{grid-template-columns:1fr}.distribution{width:100%}}
+@media(max-width:650px){.shell{padding:22px 12px}button#run{width:100%}.view-toggle{width:100%}.view-toggle button{flex:1;padding:9px 8px}}
 </style></head>
 <body><main class="shell"><header><div><h1>Tennis market volume</h1><p>Provider-reported matched volume; expand a match to inspect current order-book depth.</p></div>
-<div class="actions"><section class="distribution" aria-label="Reported matched-volume distribution by tournament">
+<div class="actions"><div class="summary-grid">
+<section class="distribution" aria-label="Reported matched-volume distribution by tournament">
 <table><thead><tr><th>Tournament Type</th><th>Polymarket %</th><th>Kalshi %</th><th>Total Matches</th></tr></thead>
 <tbody id="distribution"><tr><td colspan="4">No matched data</td></tr></tbody></table>
-<p class="unit-note">Provider-reported volume uses USD on Polymarket and contracts on Kalshi; comparison is indicative only.</p>
-</section><button id="run" onclick="runScraper()">Refresh data</button></div></header>
+<p class="unit-note">Matched volume: USD vs contracts; indicative only.</p>
+</section>
+<section class="distribution" aria-label="Match distribution by combined liquidity range">
+<table><thead><tr><th>Liquidity Range</th><th>Count</th><th>Polymarket %</th><th>Kalshi %</th></tr></thead>
+<tbody id="range-distribution"><tr><td colspan="4">No matched data</td></tr></tbody></table>
+<p class="unit-note" id="range-unit-note">Ranges use the combined amount in the selected view.</p>
+</section></div><button id="run" onclick="runScraper()">Refresh data</button></div></header>
 <div id="notice" class="notice"></div><div class="meta"><span>Last updated: <strong id="updated">-</strong></span><span>Matches: <strong id="count">0</strong></span></div>
+<div class="view-toggle" role="group" aria-label="Data display">
+<button type="button" data-view="matched" aria-pressed="true">Matched Amount</button>
+<button type="button" data-view="depth" aria-pressed="false">Order Book Depth</button>
+</div>
 <label class="filter" for="tournament-filter">Tournament type
 <select id="tournament-filter"><option value="all">All tournaments</option></select></label>
 <label class="filter" for="status-filter">Match status
 <select id="status-filter"><option value="both">Both</option><option value="pre_match">Pre-Match</option><option value="in_play">In-Play</option></select></label>
 <section class="card"><div class="table-wrap"><table><thead><tr>
 <th><button data-sort="match">Match <span class="sort-indicator"></span></button></th>
-<th><button data-sort="polymarket">Polymarket volume (USD) <span class="sort-indicator"></span></button></th>
-<th><button data-sort="kalshi">Kalshi volume (contracts) <span class="sort-indicator"></span></button></th>
-<th><button data-sort="leader">Reported-volume leader* <span class="sort-indicator"></span></button></th>
+<th><button data-sort="polymarket"><span id="polymarket-heading">Polymarket matched volume (USD)</span> <span class="sort-indicator"></span></button></th>
+<th><button data-sort="kalshi"><span id="kalshi-heading">Kalshi matched volume (contracts)</span> <span class="sort-indicator"></span></button></th>
+<th><button data-sort="leader"><span id="leader-heading">Reported-volume leader*</span> <span class="sort-indicator"></span></button></th>
 </tr></thead>
 <tbody id="rows"><tr><td colspan="4" class="empty">No matched data yet. Run the scraper to load results.</td></tr></tbody></table></div></section></main>
 <script>
 const number = value => new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(Number(value)||0);
 const esc = value => String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-let currentResults=[], sortColumn="polymarket", sortDirection="descending", selectedGrade="all", selectedStatus="both", expandedMatches=new Set();
+let currentResults=[], sortColumn="polymarket", sortDirection="descending", selectedGrade="all", selectedStatus="both", dataView="matched", expandedMatches=new Set();
 function show(message, kind){const n=document.getElementById("notice");n.textContent=message;n.className="notice show "+kind}
 const gradeLabel=grade=>({grand_slam:"Grand Slam",atp:"ATP",wta:"WTA",atp_challenger:"ATP Challenger",itf:"ITF",utr:"UTR",unknown:"Unknown"}[grade]||grade.toUpperCase());
 function updateSortIndicators(){document.querySelectorAll("th button[data-sort]").forEach(button=>{const active=button.dataset.sort===sortColumn;button.setAttribute("aria-sort",active?sortDirection:"none");const indicator=button.querySelector(".sort-indicator");indicator.textContent=active?(sortDirection==="ascending"?"↑":"↓"):"";button.setAttribute("aria-label",button.textContent.trim())})}
 function filteredResults(){return currentResults.filter(result=>(selectedGrade==="all"||result.grade===selectedGrade)&&(selectedStatus==="both"||result.phase===selectedStatus))}
+function amountFor(result,venue){return Number(dataView==="matched"?result[venue+"_volume"]:result[venue+"_depth"])||0}
+function leaderFor(result){const pm=amountFor(result,"polymarket"),kalshi=amountFor(result,"kalshi");return pm===kalshi?"Tie":pm>kalshi?"Polymarket":"Kalshi"}
 function sortedResults(){const sign=sortDirection==="ascending"?1:-1;return [...filteredResults()].sort((a,b)=>{let left,right;
- if(sortColumn==="polymarket"){left=Number(a.polymarket_volume);right=Number(b.polymarket_volume)}
- else if(sortColumn==="kalshi"){left=Number(a.kalshi_volume);right=Number(b.kalshi_volume)}
- else if(sortColumn==="leader"){left=a.volume_leader;right=b.volume_leader}
+ if(sortColumn==="polymarket"){left=amountFor(a,"polymarket");right=amountFor(b,"polymarket")}
+ else if(sortColumn==="kalshi"){left=amountFor(a,"kalshi");right=amountFor(b,"kalshi")}
+ else if(sortColumn==="leader"){left=leaderFor(a);right=leaderFor(b)}
  else {left=a.competitors.toLocaleLowerCase();right=b.competitors.toLocaleLowerCase()}
  const result=typeof left==="string"?left.localeCompare(right):left-right;return result===0?a.competitors.localeCompare(b.competitors):result*sign})}
-function marketPanel(title,markets,venue){const body=markets.length?markets.map(m=>`<div class="market-item"><span><span class="market-name">${esc(m.name||"Match Winner")}</span>${m.selection?`<span class="market-selection">${esc(m.selection)}</span>`:""}</span><span class="market-amount">${number(m.liquidity)} ${esc(m.currency||"USD")}</span></div>`).join(""):'<div class="sub">No market details available in this snapshot.</div>';return `<section class="market-panel"><h3 class="${venue}">${esc(title)} order-book depth</h3>${body}</section>`}
+function marketPanel(title,markets,venue){const depth=dataView==="depth",visibleMarkets=depth?markets:[...new Map(markets.map(m=>[`${m.name}|${m.matched_volume}`,{...m,selection:""}])).values()],body=visibleMarkets.length?visibleMarkets.map(m=>`<div class="market-item"><span><span class="market-name">${esc(m.name||"Match Winner")}</span>${m.selection?`<span class="market-selection">${esc(m.selection)}</span>`:""}</span><span class="market-amount">${number(depth?m.liquidity:m.matched_volume)} ${esc(depth?(m.currency||"USD"):m.volume_currency||"")}</span></div>`).join(""):'<div class="sub">No market details available in this snapshot.</div>';return `<section class="market-panel"><h3 class="${venue}">${esc(title)} ${depth?"order-book depth":"matched volume"}</h3>${body}</section>`}
+function summaryPercent(wins,total){return total?Math.round(wins/total*100):0}
+function tournamentRowMarkup(label,row,totalRow=false){const pm=summaryPercent(row.pm,row.total),kalshi=summaryPercent(row.kalshi,row.total);return `<tr class="${totalRow?"total-row":""}"><td><span class="grade-chip">${esc(label)}</span></td><td><div class="share-cell">${pm}%<span class="mini-bar"><i style="width:${pm}%"></i></span></div></td><td><div class="share-cell">${kalshi}%<span class="mini-bar kalshi"><i style="width:${kalshi}%"></i></span></div></td><td class="num">${row.total}</td></tr>`}
+function rangeRowMarkup(row,totalRow=false){const pm=summaryPercent(row.pm,row.total),kalshi=summaryPercent(row.kalshi,row.total);return `<tr class="${totalRow?"total-row":""}"><td><span class="grade-chip">${esc(row.label)}</span></td><td class="num">${row.total}</td><td><div class="share-cell">${pm}%<span class="mini-bar"><i style="width:${pm}%"></i></span></div></td><td><div class="share-cell">${kalshi}%<span class="mini-bar kalshi"><i style="width:${kalshi}%"></i></span></div></td></tr>`}
 function renderRows(){const results=filteredResults(),rows=document.getElementById("rows");document.getElementById("count").textContent=results.length;if(!results.length){rows.innerHTML='<tr><td colspan="4" class="empty">No conservatively matched fixtures found for these filters.</td></tr>';return}
- rows.innerHTML=sortedResults().map(r=>{const pm=Number(r.polymarket_volume),ka=Number(r.kalshi_volume),winner=r.volume_leader==="Tie"?"Tie":r.volume_leader+" higher";const cls=r.volume_leader==="Polymarket"?"pm":r.volume_leader==="Kalshi"?"ka":"tie",expanded=expandedMatches.has(r.id);
- const summary=`<tr><td><button class="expand-button" data-expand="${esc(r.id)}" aria-expanded="${expanded}" aria-label="${expanded?"Collapse":"Expand"} market details">›</button><span class="match">${esc(r.competitors)}</span><div class="sub">${esc(gradeLabel(r.grade))} · ${esc(r.phase)}</div></td><td class="${r.volume_leader==="Polymarket"?"winner":""}">${number(pm)} USD</td><td class="${r.volume_leader==="Kalshi"?"winner":""}">${number(ka)} contracts</td><td class="${cls}"><span class="badge">${esc(winner)}</span></td></tr>`;
+ const unit=dataView==="matched"?["USD","contracts"]:["USD","USD"];
+ rows.innerHTML=sortedResults().map(r=>{const pm=amountFor(r,"polymarket"),ka=amountFor(r,"kalshi"),leader=leaderFor(r),winner=leader==="Tie"?"Tie":leader+" higher";const cls=leader==="Polymarket"?"pm":leader==="Kalshi"?"ka":"tie",expanded=expandedMatches.has(r.id);
+ const summary=`<tr><td><button class="expand-button" data-expand="${esc(r.id)}" aria-expanded="${expanded}" aria-label="${expanded?"Collapse":"Expand"} market details">›</button><span class="match">${esc(r.competitors)}</span><div class="sub">${esc(gradeLabel(r.grade))} · ${esc(r.phase)}</div></td><td class="${leader==="Polymarket"?"winner":""}">${number(pm)} ${unit[0]}</td><td class="${leader==="Kalshi"?"winner":""}">${number(ka)} ${unit[1]}</td><td class="${cls}"><span class="badge">${esc(winner)}</span></td></tr>`;
  const details=`<tr class="details-row" data-detail-for="${esc(r.id)}" ${expanded?"":"hidden"}><td colspan="4" class="detail-cell"><div class="market-panels">${marketPanel("Polymarket",r.markets.polymarket,"pm")}${marketPanel("Kalshi",r.markets.kalshi,"ka")}</div></td></tr>`;
  return summary+details}).join("")}
-function renderDistribution(){const grouped=new Map();for(const result of filteredResults()){const grade=result.grade||"unknown";if(!grouped.has(grade))grouped.set(grade,{total:0,pm:0,kalshi:0});const row=grouped.get(grade);row.total++;if(result.volume_leader==="Polymarket")row.pm++;if(result.volume_leader==="Kalshi")row.kalshi++}
+function renderDistribution(){const grouped=new Map();for(const result of filteredResults()){const grade=result.grade||"unknown";if(!grouped.has(grade))grouped.set(grade,{total:0,pm:0,kalshi:0});const row=grouped.get(grade);row.total++;const leader=leaderFor(result);if(leader==="Polymarket")row.pm++;if(leader==="Kalshi")row.kalshi++}
  const body=document.getElementById("distribution");if(!grouped.size){body.innerHTML='<tr><td colspan="4">No matched data</td></tr>';return}
  const total=[...grouped.values()].reduce((sum,row)=>({total:sum.total+row.total,pm:sum.pm+row.pm,kalshi:sum.kalshi+row.kalshi}),{total:0,pm:0,kalshi:0});
- const rowMarkup=(label,row,totalRow=false)=>{const pm=Math.round(row.pm/row.total*100),kalshi=Math.round(row.kalshi/row.total*100);return `<tr class="${totalRow?"total-row":""}"><td><span class="grade-chip">${esc(label)}</span></td><td><div class="share-cell">${pm}%<span class="mini-bar"><i style="width:${pm}%"></i></span></div></td><td><div class="share-cell">${kalshi}%<span class="mini-bar kalshi"><i style="width:${kalshi}%"></i></span></div></td><td class="num">${row.total}</td></tr>`};
- body.innerHTML=[...grouped.entries()].sort((a,b)=>gradeLabel(a[0]).localeCompare(gradeLabel(b[0]))).map(([grade,row])=>rowMarkup(gradeLabel(grade),row)).join("")+rowMarkup("Total",total,true)}
-function render(data){currentResults=data.results||[];document.getElementById("updated").textContent=data.updated_at?new Date(data.updated_at).toLocaleString():"-";const filter=document.getElementById("tournament-filter"),previous=selectedGrade,grades=[...new Set(currentResults.map(result=>result.grade||"unknown"))].sort();filter.innerHTML='<option value="all">All tournaments</option>'+grades.map(grade=>`<option value="${esc(grade)}">${esc(gradeLabel(grade))}</option>`).join("");selectedGrade=grades.includes(previous)?previous:"all";filter.value=selectedGrade;updateSortIndicators();renderRows();renderDistribution()}
+ body.innerHTML=[...grouped.entries()].sort((a,b)=>gradeLabel(a[0]).localeCompare(gradeLabel(b[0]))).map(([grade,row])=>tournamentRowMarkup(gradeLabel(grade),row)).join("")+tournamentRowMarkup("Total",total,true)}
+function renderRangeDistribution(){const bands=[{label:"<5k",min:0,max:5000},{label:"5k-25k",min:5000,max:25000},{label:"25k-100k",min:25000,max:100000},{label:"100k+",min:100000,max:Infinity}];const rows=bands.map(band=>({label:band.label,total:0,pm:0,kalshi:0}));for(const result of filteredResults()){const combined=amountFor(result,"polymarket")+amountFor(result,"kalshi"),index=bands.findIndex(band=>combined>=band.min&&combined<band.max);if(index<0)continue;const row=rows[index],leader=leaderFor(result);row.total++;if(leader==="Polymarket")row.pm++;if(leader==="Kalshi")row.kalshi++}
+ const body=document.getElementById("range-distribution"),total=rows.reduce((sum,row)=>({label:"Total",total:sum.total+row.total,pm:sum.pm+row.pm,kalshi:sum.kalshi+row.kalshi}),{label:"Total",total:0,pm:0,kalshi:0});body.innerHTML=rows.map(row=>rangeRowMarkup(row)).join("")+rangeRowMarkup(total,true)}
+function updateViewLabels(){const depth=dataView==="depth";document.getElementById("polymarket-heading").textContent=depth?"Polymarket order-book depth (USD)":"Polymarket matched volume (USD)";document.getElementById("kalshi-heading").textContent=depth?"Kalshi order-book depth (USD)":"Kalshi matched volume (contracts)";document.getElementById("leader-heading").textContent=depth?"Order-book depth leader":"Reported-volume leader*";document.getElementById("range-unit-note").textContent=depth?"Ranges use combined USD order-book depth.":"Ranges use combined reported amounts (USD + contracts), indicative only.";document.querySelectorAll("[data-view]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.view===dataView)))}
+function renderDisplays(){renderRows();renderDistribution();renderRangeDistribution()}
+function render(data){currentResults=data.results||[];document.getElementById("updated").textContent=data.updated_at?new Date(data.updated_at).toLocaleString():"-";const filter=document.getElementById("tournament-filter"),previous=selectedGrade,grades=[...new Set(currentResults.map(result=>result.grade||"unknown"))].sort();filter.innerHTML='<option value="all">All tournaments</option>'+grades.map(grade=>`<option value="${esc(grade)}">${esc(gradeLabel(grade))}</option>`).join("");selectedGrade=grades.includes(previous)?previous:"all";filter.value=selectedGrade;updateViewLabels();updateSortIndicators();renderDisplays()}
 document.querySelectorAll("th button[data-sort]").forEach(button=>button.addEventListener("click",()=>{if(sortColumn===button.dataset.sort)sortDirection=sortDirection==="ascending"?"descending":"ascending";else{sortColumn=button.dataset.sort;sortDirection="ascending"}updateSortIndicators();renderRows()}));updateSortIndicators();
 document.getElementById("rows").addEventListener("click",event=>{const button=event.target.closest("button[data-expand]");if(!button)return;const id=button.dataset.expand;if(expandedMatches.has(id))expandedMatches.delete(id);else expandedMatches.add(id);const details=document.querySelector(`[data-detail-for="${CSS.escape(id)}"]`);if(details)details.hidden=!expandedMatches.has(id);button.setAttribute("aria-expanded",String(expandedMatches.has(id)));button.setAttribute("aria-label",expandedMatches.has(id)?"Collapse market details":"Expand market details")});
-document.getElementById("tournament-filter").addEventListener("change",event=>{selectedGrade=event.target.value;renderRows();renderDistribution()});
-document.getElementById("status-filter").addEventListener("change",event=>{selectedStatus=event.target.value;renderRows();renderDistribution()});
+document.getElementById("tournament-filter").addEventListener("change",event=>{selectedGrade=event.target.value;renderDisplays()});
+document.getElementById("status-filter").addEventListener("change",event=>{selectedStatus=event.target.value;renderDisplays()});
+document.querySelectorAll("[data-view]").forEach(button=>button.addEventListener("click",()=>{dataView=button.dataset.view;updateViewLabels();renderDisplays()}));
 async function load(){const response=await fetch("/api/results");if(response.ok)render(await response.json())}
 async function runScraper(){const button=document.getElementById("run");button.disabled=true;button.textContent="Refreshing…";show("Collecting current markets from Polymarket and Kalshi…","success");
  try{const response=await fetch("/api/scrape",{method:"POST"});const data=await response.json();if(!response.ok)throw new Error(data.error||"Scrape failed");show(`Scrape complete: ${data.count} snapshots collected.`,"success");render(data)}catch(error){show(error.message,"error")}finally{button.disabled=false;button.textContent="Refresh data"}}
@@ -121,7 +146,9 @@ def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
                     "name": str(item.get("name") or snapshot.market_name),
                     "selection": str(item.get("selection") or ""),
                     "liquidity": str(item.get("liquidity") or "0"),
+                    "matched_volume": str(item.get("matched_volume") or "0"),
                     "currency": str(item.get("currency") or snapshot.currency),
+                    "volume_currency": "contracts" if snapshot.provider == "kalshi" else "USD",
                 }
                 for item in details if isinstance(item, dict)
             ]
@@ -130,6 +157,8 @@ def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
             "selection": "",
             "liquidity": str(displayed_orderbook_depth(snapshot)),
             "currency": snapshot.currency,
+            "matched_volume": str(snapshot.matched_volume),
+            "volume_currency": "contracts" if snapshot.provider == "kalshi" else "USD",
         }]
 
     phases = {comparison.polymarket.phase.value, comparison.kalshi.phase.value}
@@ -149,6 +178,8 @@ def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
         "phase": phase,
         "polymarket_volume": str(comparison.polymarket_volume),
         "kalshi_volume": str(comparison.kalshi_volume),
+        "polymarket_depth": str(displayed_orderbook_depth(comparison.polymarket)),
+        "kalshi_depth": str(displayed_orderbook_depth(comparison.kalshi)),
         "volume_leader": comparison.volume_leader,
         "match_confidence": comparison.confidence,
         "markets": {
