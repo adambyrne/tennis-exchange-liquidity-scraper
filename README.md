@@ -49,10 +49,12 @@ python main.py compare-liquidity --db liquidity.sqlite3 tennis-comparison.csv
 The default `all` provider collects from both venues. Select one explicitly
 with `--provider polymarket` or `--provider kalshi`; use `--max-events N` to
 cap a collection run while testing. Polymarket pages active tennis events and
-reads match-winner CLOB books. Kalshi discovers open tennis match series and
-reads the public YES/NO order book for each event's canonical player-winner
-market. The Kalshi public market-data endpoints used here do not require API
-credentials. Neither adapter places orders. Each snapshot preserves
+reads one match-winner outcome book, which supplies the normalized two-sided
+liquidity without a redundant fetch of its complementary outcome. Kalshi
+discovers open tennis match series and reads the public YES/NO order book for
+each event's canonical player-winner market. The Kalshi public market-data
+endpoints used here do not require API credentials. Neither adapter places
+orders. Each snapshot preserves
 provider/event/market IDs, competitors, start and observation timestamps,
 automated competition grade, pre-match/in-play phase, visible liquidity,
 matched volume, currency, and raw provenance. SQLite is the local-first
@@ -79,6 +81,15 @@ python main.py scrape --provider kalshi --once --db liquidity.sqlite3
 python main.py compare-liquidity --db liquidity.sqlite3 tennis-comparison.csv
 ```
 
+Each successful scrape atomically replaces the previous snapshot set in
+`liquidity.sqlite3`; it does not append old runs. CSV export reads that current
+set and overwrites the destination CSV file. A failed provider request leaves
+the last complete set in place. The one-shot scrape summary reports separate
+Polymarket and Kalshi counts so a venue returning no events is visible. Provider
+discovery runs concurrently, and independent order-book requests use up to
+eight workers per venue to reduce collection time. Kalshi discovery concurrency
+is capped at four, and transient rate limits are retried.
+
 `compare-liquidity` compares the latest stored snapshot for each market and
 exports only one-to-one, unambiguous cross-venue matches. Matching uses both
 competitors (order-independent) and a 36-hour start-time window; similar names
@@ -97,11 +108,10 @@ certificate bundle used by the adapter:
 python -m pip install --upgrade certifi
 ```
 
-The adapters store each observation locally. Re-running them builds your own
-historical series; they do not fabricate past order-book data. Kalshi market
-availability, API rate limits, and service access can vary by location and
-exchange policy. Betfair's Exchange API requires an authenticated client and
-is not enabled.
+Because each successful scrape replaces the previous snapshot set, this mode
+does not build a historical time series. Kalshi market availability, API rate
+limits, and service access can vary by location and exchange policy. Betfair's
+Exchange API requires an authenticated client and is not enabled.
 
 Polymarket `grade` uses the event's official sport/series metadata, with
 tournament-name rules for ITF circuit codes such as `M25` and `W50`.

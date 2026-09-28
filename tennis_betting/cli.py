@@ -10,7 +10,7 @@ from .providers import (
     KalshiPublicLiquidityProvider,
     PolymarketPublicLiquidityProvider,
 )
-from .scraper import collect_once, run_scheduler
+from .scraper import collect_once, collection_summary, run_scheduler
 from .storage import (
     connect_database, export_csv, export_liquidity_comparison_csv, export_liquidity_csv,
     export_liquidity_parquet, load_slip, save_slip,
@@ -121,7 +121,8 @@ def main(argv: list[str] | None = None) -> None:
         connection = connect_database(args.db)
         try:
             if args.once:
-                print(f"Collected {len(collect_once(providers, connection))} snapshots")
+                snapshots = collect_once(providers, connection)
+                print(collection_summary(providers, snapshots))
             else:
                 run_scheduler(providers, connection, args.interval)
         finally:

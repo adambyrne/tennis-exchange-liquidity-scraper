@@ -3,9 +3,11 @@ from __future__ import annotations
 import os
 import json
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Protocol
@@ -18,6 +20,19 @@ try:
     import certifi
 except ImportError:  # pragma: no cover - depends on the host Python installation
     certifi = None
+
+_MAX_CONCURRENT_REQUESTS = 8
+_MAX_CONCURRENT_DISCOVERY_REQUESTS = 4
+_RATE_LIMIT_RETRIES = 3
+
+
+def _rate_limit_delay(error: urllib.error.HTTPError, attempt: int) -> float:
+    retry_after = error.headers.get("Retry-After")
+    try:
+        delay = float(retry_after) if retry_after is not None else float(2 ** attempt)
+    except ValueError:
+        delay = float(2 ** attempt)
+    return min(max(delay, 0.0), 30.0)
 
 
 class ProviderError(RuntimeError):
@@ -77,16 +92,20 @@ class PolymarketPublicLiquidityProvider:
                 "User-Agent": "tennis-exchange-liquidity-scraper/1.0",
             },
         )
-        try:
-            context = ssl.create_default_context(cafile=certifi.where()) if certifi else None
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds, context=context) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            if error.code == 404:
-                raise PolymarketNotFoundError(f"Polymarket resource not found: {url}") from error
-            raise ProviderError(f"Polymarket request failed for {url}: HTTP {error.code}") from error
-        except (OSError, ValueError) as error:
-            raise ProviderError(f"Polymarket request failed for {url}: {error}") from error
+        context = ssl.create_default_context(cafile=certifi.where()) if certifi else None
+        for attempt in range(_RATE_LIMIT_RETRIES + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout_seconds, context=context) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as error:
+                if error.code == 404:
+                    raise PolymarketNotFoundError(f"Polymarket resource not found: {url}") from error
+                if error.code == 429 and attempt < _RATE_LIMIT_RETRIES:
+                    time.sleep(_rate_limit_delay(error, attempt))
+                    continue
+                raise ProviderError(f"Polymarket request failed for {url}: HTTP {error.code}") from error
+            except (OSError, ValueError) as error:
+                raise ProviderError(f"Polymarket request failed for {url}: {error}") from error
 
     @staticmethod
     def _competitors(question: str) -> tuple[str, ...]:
@@ -103,15 +122,89 @@ class PolymarketPublicLiquidityProvider:
         title = " ".join(event_name.split()).casefold()
         return bool(question and title and question == title)
 
+    def _snapshot_for_event(
+        self, event: dict, observed: datetime,
+    ) -> LiquiditySnapshot | None:
+        event_name = str(event.get("title") or event.get("slug") or "")
+        if not event_name:
+            return None
+        market = next((
+            item for item in event.get("markets", [])
+            if isinstance(item, dict) and self._is_match_winner_market(item, event_name)
+        ), None)
+        if market is None:
+            return None
+        raw_token_ids = market.get("clobTokenIds", "[]")
+        try:
+            token_ids = json.loads(raw_token_ids) if isinstance(raw_token_ids, str) else raw_token_ids
+        except ValueError:
+            token_ids = []
+        if not isinstance(token_ids, list) or not token_ids:
+            return None
+        books: list[dict] = []
+        # The first outcome's bids and asks provide the two-sided view; fetching
+        # the complementary outcome's book repeats a network request and isn't
+        # used in the normalized liquidity totals.
+        for token_id in token_ids[:1]:
+            try:
+                book = self._get_json(
+                    f"{self.clob_endpoint}?{urllib.parse.urlencode({'token_id': token_id})}"
+                )
+            except PolymarketNotFoundError:
+                continue
+            if isinstance(book, dict):
+                books.append(book)
+        if not books:
+            return None
+        # One binary outcome's bids and asks represent both sides of this market.
+        bids = books[0].get("bids", [])
+        asks = books[0].get("asks", [])
+        bid_liquidity = sum(Decimal(str(item["price"])) * Decimal(str(item["size"])) for item in bids)
+        ask_liquidity = sum(Decimal(str(item["price"])) * Decimal(str(item["size"])) for item in asks)
+        market = {
+            **market,
+            "event_id": event.get("id"),
+            "event_name": event_name,
+            "event_start_time": event.get("startTime") or event.get("startDate"),
+            "event_sport": event.get("sport"),
+            "event_series": event.get("series"),
+        }
+        raw = {"market": market, "order_books": books}
+        sport = event.get("sport")
+        sport_names = [
+            sport.get("name", ""), sport.get("sport", ""),
+        ] if isinstance(sport, dict) else [str(sport or "")]
+        series_names = [
+            str(series.get("title", ""))
+            for series in event.get("series", [])
+            if isinstance(series, dict)
+        ]
+        grade = classify_event(event_name)
+        if grade.value == "unknown":
+            grade = classify_event(" ".join([*sport_names, *series_names]))
+        return normalize_snapshot({
+            "event_id": market.get("event_id") or market.get("conditionId") or market.get("id"),
+            "market_id": market.get("id") or market.get("conditionId"),
+            "event_name": event_name,
+            "market_name": "Match Winner",
+            "competitors": self._competitors(str(market.get("question", ""))),
+            "start_time": market.get("event_start_time") or market.get("startTime")
+            or market.get("startDate") or observed.isoformat(),
+            "available_back": bid_liquidity,
+            "available_unmatched": ask_liquidity,
+            "matched_volume": market.get("volume", 0),
+            "grade": market.get("grade") or grade.value,
+            "currency": "USDC",
+            "source_url": f"https://polymarket.com/event/{market.get('slug', '')}",
+            "raw": raw,
+        }, self.name, observed)
+
     def snapshots(self, observed_at: datetime | None = None) -> list[LiquiditySnapshot]:
         observed = observed_at or datetime.now(timezone.utc)
         events: list[dict] = []
         offset = 0
         while self.max_events is None or len(events) < self.max_events:
-            page_limit = (
-                100 if self.max_events is None
-                else min(100, self.max_events - len(events))
-            )
+            page_limit = 100 if self.max_events is None else min(100, self.max_events - len(events))
             query = urllib.parse.urlencode({
                 "active": "true", "closed": "false", "limit": page_limit,
                 "offset": offset, "tag_slug": "tennis", "order": "endDate", "ascending": "true",
@@ -124,81 +217,11 @@ class PolymarketPublicLiquidityProvider:
                 break
             offset += len(page)
 
-        snapshots: list[LiquiditySnapshot] = []
-        for event in events:
-            event_name = str(event.get("title") or event.get("slug") or "")
-            if not event_name:
-                continue
-            market = next((
-                market for market in event.get("markets", [])
-                if isinstance(market, dict)
-                and self._is_match_winner_market(market, event_name)
-            ), None)
-            if market is None:
-                continue
-            raw_token_ids = market.get("clobTokenIds", "[]")
-            try:
-                token_ids = json.loads(raw_token_ids) if isinstance(raw_token_ids, str) else raw_token_ids
-            except ValueError:
-                token_ids = []
-            if not isinstance(token_ids, list) or not token_ids:
-                continue
-            books: list[dict] = []
-            for token_id in token_ids[:2]:
-                try:
-                    book = self._get_json(
-                        f"{self.clob_endpoint}?{urllib.parse.urlencode({'token_id': token_id})}"
-                    )
-                except PolymarketNotFoundError:
-                    continue
-                if isinstance(book, dict):
-                    books.append(book)
-            if not books:
-                continue
-            # One binary outcome's bids and asks represent the two sides of the
-            # match-winner market. Summing both outcome books double-counts depth.
-            bids = books[0].get("bids", [])
-            asks = books[0].get("asks", [])
-            bid_liquidity = sum(Decimal(str(item["price"])) * Decimal(str(item["size"])) for item in bids)
-            ask_liquidity = sum(Decimal(str(item["price"])) * Decimal(str(item["size"])) for item in asks)
-            market = {
-                **market,
-                "event_id": event.get("id"),
-                "event_name": event_name,
-                "event_start_time": event.get("startTime") or event.get("startDate"),
-                "event_sport": event.get("sport"),
-                "event_series": event.get("series"),
-            }
-            raw = {"market": market, "order_books": books}
-            sport = event.get("sport")
-            sport_names = [
-                sport.get("name", ""), sport.get("sport", ""),
-            ] if isinstance(sport, dict) else [str(sport or "")]
-            series_names = [
-                str(series.get("title", ""))
-                for series in event.get("series", [])
-                if isinstance(series, dict)
-            ]
-            grade = classify_event(event_name)
-            if grade.value == "unknown":
-                grade = classify_event(" ".join([*sport_names, *series_names]))
-            snapshots.append(normalize_snapshot({
-                "event_id": market.get("event_id") or market.get("conditionId") or market.get("id"),
-                "market_id": market.get("id") or market.get("conditionId"),
-                "event_name": event_name,
-                "market_name": "Match Winner",
-                "competitors": self._competitors(str(market.get("question", ""))),
-                "start_time": market.get("event_start_time") or market.get("startTime")
-                or market.get("startDate") or observed.isoformat(),
-                "available_back": bid_liquidity,
-                "available_unmatched": ask_liquidity,
-                "matched_volume": market.get("volume", 0),
-                "grade": market.get("grade") or grade.value,
-                "currency": "USDC",
-                "source_url": f"https://polymarket.com/event/{market.get('slug', '')}",
-                "raw": raw,
-            }, self.name, observed))
-        return snapshots
+        with ThreadPoolExecutor(max_workers=_MAX_CONCURRENT_REQUESTS) as executor:
+            snapshots = list(executor.map(
+                lambda event: self._snapshot_for_event(event, observed), events,
+            ))
+        return [snapshot for snapshot in snapshots if snapshot is not None]
 
 
 class KalshiPublicLiquidityProvider:
@@ -223,14 +246,18 @@ class KalshiPublicLiquidityProvider:
                 "User-Agent": "tennis-exchange-liquidity-scraper/1.0",
             },
         )
-        try:
-            context = ssl.create_default_context(cafile=certifi.where()) if certifi else None
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds, context=context) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            raise ProviderError(f"Kalshi request failed for {url}: HTTP {error.code}") from error
-        except (OSError, ValueError) as error:
-            raise ProviderError(f"Kalshi request failed for {url}: {error}") from error
+        context = ssl.create_default_context(cafile=certifi.where()) if certifi else None
+        for attempt in range(_RATE_LIMIT_RETRIES + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout_seconds, context=context) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as error:
+                if error.code == 429 and attempt < _RATE_LIMIT_RETRIES:
+                    time.sleep(_rate_limit_delay(error, attempt))
+                    continue
+                raise ProviderError(f"Kalshi request failed for {url}: HTTP {error.code}") from error
+            except (OSError, ValueError) as error:
+                raise ProviderError(f"Kalshi request failed for {url}: {error}") from error
 
     def _tennis_match_series(self) -> list[tuple[str, str]]:
         if self._series_cache is not None:
@@ -281,86 +308,108 @@ class KalshiPublicLiquidityProvider:
                 total += Decimal(str(level[0])) * Decimal(str(level[1]))
         return total
 
+    def _events_for_series(self, series: tuple[str, str]) -> list[tuple[dict, str, str]]:
+        series_ticker, series_title = series
+        results: list[tuple[dict, str, str]] = []
+        cursor: str | None = None
+        while True:
+            params: dict[str, object] = {
+                "status": "open",
+                "series_ticker": series_ticker,
+                "limit": 200,
+                "with_nested_markets": "true",
+            }
+            if cursor:
+                params["cursor"] = cursor
+            response = self._get_json("events", params)
+            if not isinstance(response, dict) or not isinstance(response.get("events"), list):
+                raise ProviderError(f"Kalshi returned invalid events for series {series_ticker}")
+            events = response["events"]
+            results.extend(
+                (event, series_ticker, series_title)
+                for event in events if isinstance(event, dict)
+            )
+            cursor = response.get("cursor")
+            if not cursor or not events:
+                break
+        return results
+
+    def _snapshot_for_event(
+        self, item: tuple[dict, str, str], observed: datetime,
+    ) -> LiquiditySnapshot | None:
+        event, series_ticker, series_title = item
+        event_ticker = str(event.get("event_ticker") or "")
+        markets = event.get("markets")
+        if not event_ticker or not isinstance(markets, list):
+            return None
+        valid_markets = [market for market in markets if isinstance(market, dict)]
+        competitors = self._event_competitors(valid_markets)
+        if len(competitors) != 2:
+            return None
+        winner_markets = sorted(
+            (market for market in valid_markets
+             if str(market.get("title", "")).casefold().endswith(" wins")
+             and str(market.get("status") or "active").casefold() in {"active", "open"}),
+            key=lambda market: str(market.get("ticker", "")),
+        )
+        if not winner_markets:
+            return None
+        market = winner_markets[0]
+        market_ticker = str(market.get("ticker") or "")
+        if not market_ticker:
+            return None
+        book_response = self._get_json(
+            f"markets/{urllib.parse.quote(market_ticker, safe='')}/orderbook"
+        )
+        if not isinstance(book_response, dict):
+            raise ProviderError(f"Kalshi returned invalid order book for market {market_ticker}")
+        orderbook = book_response.get("orderbook_fp", {})
+        if not isinstance(orderbook, dict):
+            raise ProviderError(f"Kalshi returned invalid order book for market {market_ticker}")
+        yes_liquidity = self._side_notional(orderbook.get("yes_dollars"))
+        no_liquidity = self._side_notional(orderbook.get("no_dollars"))
+        grade = classify_event(f"{series_title} {event.get('title', '')}")
+        return normalize_snapshot({
+            "event_id": event_ticker,
+            "market_id": market_ticker,
+            "event_name": str(event.get("title") or event_ticker),
+            "market_name": "Match Winner",
+            "competitors": competitors,
+            "start_time": market.get("open_time") or observed.isoformat(),
+            "available_back": yes_liquidity,
+            "available_unmatched": no_liquidity,
+            "matched_volume": market.get("volume_fp") or market.get("volume", 0),
+            "grade": grade.value,
+            "currency": "USD",
+            "source_url": f"https://kalshi.com/markets/{series_ticker}/{event_ticker}/{market_ticker}",
+            "raw": {
+                "series": {"ticker": series_ticker, "title": series_title},
+                "event": event,
+                "market": market,
+                "orderbook": orderbook,
+            },
+        }, self.name, observed)
+
     def snapshots(self, observed_at: datetime | None = None) -> list[LiquiditySnapshot]:
         observed = observed_at or datetime.now(timezone.utc)
-        snapshots: list[LiquiditySnapshot] = []
+        series = self._tennis_match_series()
+        with ThreadPoolExecutor(max_workers=_MAX_CONCURRENT_DISCOVERY_REQUESTS) as executor:
+            event_groups = executor.map(self._events_for_series, series)
+            events = [item for group in event_groups for item in group]
+        unique_events = []
         seen_events: set[str] = set()
-        for series_ticker, series_title in self._tennis_match_series():
-            cursor: str | None = None
-            while self.max_events is None or len(snapshots) < self.max_events:
-                params: dict[str, object] = {
-                    "status": "open",
-                    "series_ticker": series_ticker,
-                    "limit": 200,
-                    "with_nested_markets": "true",
-                }
-                if cursor:
-                    params["cursor"] = cursor
-                response = self._get_json("events", params)
-                if not isinstance(response, dict) or not isinstance(response.get("events"), list):
-                    raise ProviderError(f"Kalshi returned invalid events for series {series_ticker}")
-                events = response["events"]
-                for event in events:
-                    if not isinstance(event, dict):
-                        continue
-                    event_ticker = str(event.get("event_ticker") or "")
-                    markets = event.get("markets")
-                    if not event_ticker or event_ticker in seen_events or not isinstance(markets, list):
-                        continue
-                    seen_events.add(event_ticker)
-                    valid_markets = [market for market in markets if isinstance(market, dict)]
-                    competitors = self._event_competitors(valid_markets)
-                    if len(competitors) != 2:
-                        continue
-                    winner_markets = sorted(
-                        (market for market in valid_markets
-                         if str(market.get("title", "")).casefold().endswith(" wins")
-                         and str(market.get("status") or "active").casefold() in {"active", "open"}),
-                        key=lambda market: str(market.get("ticker", "")),
-                    )
-                    if not winner_markets:
-                        continue
-                    market = winner_markets[0]
-                    market_ticker = str(market.get("ticker") or "")
-                    if not market_ticker:
-                        continue
-                    book_response = self._get_json(f"markets/{urllib.parse.quote(market_ticker, safe='')}/orderbook")
-                    if not isinstance(book_response, dict):
-                        raise ProviderError(f"Kalshi returned invalid order book for market {market_ticker}")
-                    orderbook = book_response.get("orderbook_fp", {})
-                    if not isinstance(orderbook, dict):
-                        raise ProviderError(f"Kalshi returned invalid order book for market {market_ticker}")
-                    yes_liquidity = self._side_notional(orderbook.get("yes_dollars"))
-                    no_liquidity = self._side_notional(orderbook.get("no_dollars"))
-                    grade = classify_event(f"{series_title} {event.get('title', '')}")
-                    snapshots.append(normalize_snapshot({
-                        "event_id": event_ticker,
-                        "market_id": market_ticker,
-                        "event_name": str(event.get("title") or event_ticker),
-                        "market_name": "Match Winner",
-                        "competitors": competitors,
-                        "start_time": market.get("open_time") or observed.isoformat(),
-                        "available_back": yes_liquidity,
-                        "available_unmatched": no_liquidity,
-                        "matched_volume": market.get("volume_fp") or market.get("volume", 0),
-                        "grade": grade.value,
-                        "currency": "USD",
-                        "source_url": f"https://kalshi.com/markets/{series_ticker}/{event_ticker}/{market_ticker}",
-                        "raw": {
-                            "series": {"ticker": series_ticker, "title": series_title},
-                            "event": event,
-                            "market": market,
-                            "orderbook": orderbook,
-                        },
-                    }, self.name, observed))
-                    if self.max_events is not None and len(snapshots) >= self.max_events:
-                        break
-                cursor = response.get("cursor")
-                if not cursor or not events or (
-                    self.max_events is not None and len(snapshots) >= self.max_events
-                ):
-                    break
-        return snapshots
+        for event, ticker, title in events:
+            event_ticker = str(event.get("event_ticker") or "")
+            if event_ticker and event_ticker not in seen_events:
+                seen_events.add(event_ticker)
+                unique_events.append((event, ticker, title))
+        if self.max_events is not None:
+            unique_events = unique_events[:self.max_events]
+        with ThreadPoolExecutor(max_workers=_MAX_CONCURRENT_REQUESTS) as executor:
+            snapshots = list(executor.map(
+                lambda item: self._snapshot_for_event(item, observed), unique_events,
+            ))
+        return [snapshot for snapshot in snapshots if snapshot is not None]
 
 
 class BetfairLiquidityProvider(CredentialedLiquidityProvider):
