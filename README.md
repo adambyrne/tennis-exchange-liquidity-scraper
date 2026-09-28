@@ -94,29 +94,32 @@ is capped at four, and transient rate limits are retried.
 `compare-liquidity` compares the latest stored snapshot for each market and
 exports only one-to-one, unambiguous cross-venue matches. Matching uses both
 competitors (order-independent) and a 36-hour start-time window; similar names
-or ambiguous duplicate fixtures are left out rather than guessed. The
-comparison's visible-liquidity figure is gross displayed order notional:
-Polymarket uses bids plus asks from one outcome token, while Kalshi uses YES
-and NO bid levels from one player-winner market (price multiplied by contract
-quantity). This avoids counting complementary outcomes twice; it is a current
-order-book depth comparison, not traded volume, executable profit, or a
-guarantee that liquidity is available at one price.
+or ambiguous duplicate fixtures are left out rather than guessed. The UI and
+CSV compare provider-reported matched volume. Polymarket reports
+market volume in USD, while Kalshi reports volume in contracts; these native
+units are not directly comparable, so relative leaders and win percentages are
+indicative only. Expandable UI rows separately show current order-book depth:
+Polymarket bids plus asks from outcome books and Kalshi YES/NO bid levels
+(price multiplied by contract quantity). This is resting depth, not traded
+volume, executable profit, or a guarantee that liquidity is available at one
+price.
 
 The `ui` command starts a small dependency-free local dashboard at
 `http://127.0.0.1:8000`. Open that address in a browser and use **Refresh data**
 to run both providers and refresh the comparison table. The dashboard shows
-the last update time, match count, USD liquidity on each venue, and a colored
-leader indicator. Results default to highest combined liquidity and all table
-columns are sortable by clicking their headers. Filter the results by
-tournament type; the tournament summary table updates to show each type's
-Polymarket/Kalshi liquidity-win percentages and matched count, respecting the
-active filter, with visual progress bars. Expand a match row to compare the
-available Polymarket outcome books and Kalshi player-winner markets with their
-individual displayed liquidity. Older snapshots without per-market detail
-show their stored aggregate liquidity as a fallback. Doubles teams are matched
-as pairs, including abbreviated Polymarket names, and Kalshi ATP Challenger
-series are included even when the series title omits the word "match". Use
-`--host` or `--port` if needed.
+the last update time, match count, provider-reported matched volume, and a
+colored leader indicator. Since the venues report different units (USD versus
+contracts), volume comparisons are indicative rather than currency-normalized.
+Results default to highest Polymarket-reported volume; sortable columns can be
+changed by clicking their headers. Filter by tournament type and match status
+(pre-match, in-play, or both); the summary table and results update together.
+The summary breaks out reported-volume leaders by tournament type and includes
+an aggregate total row with visual progress bars. Expand a match row to compare
+current Polymarket outcome-book and Kalshi player-winner order-book depth.
+Older snapshots without per-market detail show their stored aggregate depth as
+a fallback. Doubles teams are matched as pairs, including abbreviated
+Polymarket names, and Kalshi ATP Challenger series are included even when the
+series title omits the word "match". Use `--host` or `--port` if needed.
 Stop it with `Ctrl+C`.
 
 If Python reports a local certificate verification error on Windows, update the

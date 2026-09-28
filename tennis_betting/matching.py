@@ -46,18 +46,39 @@ class LiquidityComparison:
     polymarket: LiquiditySnapshot
     kalshi: LiquiditySnapshot
     confidence: float
-    polymarket_liquidity: Decimal
-    kalshi_liquidity: Decimal
+    polymarket_volume: Decimal
+    kalshi_volume: Decimal
 
     @property
-    def more_liquid(self) -> str:
-        if self.polymarket_liquidity == self.kalshi_liquidity:
+    def volume_leader(self) -> str:
+        if self.polymarket_volume == self.kalshi_volume:
             return "Tie"
-        return "Polymarket" if self.polymarket_liquidity > self.kalshi_liquidity else "Kalshi"
+        return "Polymarket" if self.polymarket_volume > self.kalshi_volume else "Kalshi"
 
-    @property
-    def difference(self) -> Decimal:
-        return abs(self.polymarket_liquidity - self.kalshi_liquidity)
+
+def displayed_orderbook_depth(snapshot: LiquiditySnapshot) -> Decimal:
+    """Calculate gross resting-order depth for expandable UI market details."""
+    if snapshot.provider == "polymarket":
+        books = snapshot.raw.get("order_books")
+        if isinstance(books, list) and books and isinstance(books[0], dict):
+            book = books[0]
+            return sum(
+                (Decimal(str(level["price"])) * Decimal(str(level["size"]))
+                 for side in ("bids", "asks")
+                 for level in book.get(side, []) if isinstance(level, dict)),
+                Decimal("0"),
+            )
+    elif snapshot.provider == "kalshi":
+        orderbook = snapshot.raw.get("orderbook")
+        if isinstance(orderbook, dict):
+            return sum(
+                (Decimal(str(level[0])) * Decimal(str(level[1]))
+                 for side in ("yes_dollars", "no_dollars")
+                 for level in orderbook.get(side, [])
+                 if isinstance(level, (list, tuple)) and len(level) >= 2),
+                Decimal("0"),
+            )
+    return snapshot.available_back + snapshot.available_unmatched
 
 
 def _name_similarity(left: str, right: str) -> float:
@@ -99,36 +120,6 @@ def _time_delta_hours(left: datetime, right: datetime) -> float:
     if right.tzinfo is None:
         right = right.replace(tzinfo=timezone.utc)
     return abs((left - right).total_seconds()) / 3600
-
-
-def _displayed_liquidity(snapshot: LiquiditySnapshot) -> Decimal:
-    """Calculate comparable gross resting-order notional from each provider's raw book."""
-    if snapshot.provider == "polymarket":
-        books = snapshot.raw.get("order_books")
-        if isinstance(books, list) and books and isinstance(books[0], dict):
-            book = books[0]
-            bids = sum(
-                (Decimal(str(level["price"])) * Decimal(str(level["size"]))
-                 for level in book.get("bids", []) if isinstance(level, dict)),
-                Decimal("0"),
-            )
-            asks = sum(
-                (Decimal(str(level["price"])) * Decimal(str(level["size"]))
-                 for level in book.get("asks", []) if isinstance(level, dict)),
-                Decimal("0"),
-            )
-            return bids + asks
-    elif snapshot.provider == "kalshi":
-        orderbook = snapshot.raw.get("orderbook")
-        if isinstance(orderbook, dict):
-            return sum(
-                (Decimal(str(level[0])) * Decimal(str(level[1]))
-                 for side in ("yes_dollars", "no_dollars")
-                 for level in orderbook.get(side, [])
-                 if isinstance(level, (list, tuple)) and len(level) >= 2),
-                Decimal("0"),
-            )
-    return snapshot.available_back + snapshot.available_unmatched
 
 
 def compare_liquidity_snapshots(
@@ -186,7 +177,7 @@ def compare_liquidity_snapshots(
             left,
             right,
             confidence,
-            _displayed_liquidity(left),
-            _displayed_liquidity(right),
+            left.matched_volume,
+            right.matched_volume,
         ))
     return sorted(comparisons, key=lambda item: (item.polymarket.start_time, item.polymarket.event_name))

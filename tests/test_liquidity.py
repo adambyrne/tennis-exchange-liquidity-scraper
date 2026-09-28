@@ -218,6 +218,7 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(snapshots[0].source_market_id, "market-1")
         self.assertEqual(snapshots[0].available_back, Decimal("5.00"))
         self.assertEqual(snapshots[0].available_unmatched, Decimal("4.80"))
+        self.assertEqual(snapshots[0].matched_volume, Decimal("123.45"))
         self.assertEqual(len(snapshots[0].raw["order_books"]), 2)
         self.assertEqual(len(snapshots[0].raw["ui_markets"]), 2)
         self.assertEqual(
@@ -323,8 +324,10 @@ class LiquidityTests(unittest.TestCase):
                     "event_ticker": "KXATPMATCH-26SEP25ONE TWO",
                     "title": "Player One vs Player Two",
                     "markets": [
-                        {"ticker": "winner-two", "title": "Player Two wins", "open_time": "2026-09-25T12:00:00Z"},
-                        {"ticker": "winner-one", "title": "Player One wins", "open_time": "2026-09-25T12:00:00Z"},
+                        {"ticker": "winner-two", "title": "Player Two wins", "open_time": "2026-09-25T12:00:00Z",
+                         "volume_fp": "70"},
+                        {"ticker": "winner-one", "title": "Player One wins", "open_time": "2026-09-25T12:00:00Z",
+                         "volume_fp": "85"},
                     ],
                 }], "cursor": ""}
             return {"orderbook_fp": {
@@ -342,6 +345,7 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(snapshot.available_back, Decimal("5.000000"))
         self.assertEqual(snapshot.available_unmatched, Decimal("2.000000"))
         self.assertEqual(snapshot.grade, CompetitionGrade.ATP)
+        self.assertEqual(snapshot.matched_volume, Decimal("155"))
         self.assertEqual(snapshot.raw["orderbook"]["yes_dollars"][0], ["0.5000", "10.00"])
         self.assertEqual(len(snapshot.raw["ui_markets"]), 2)
         self.assertEqual(
@@ -412,6 +416,7 @@ class LiquidityTests(unittest.TestCase):
                 "event_id": "pm-event", "market_id": "pm-market",
                 "event_name": "ATP: Player One vs Player Two",
                 "competitors": ["Player One", "Player Two"], "start_time": start,
+                "matched_volume": "130",
             }, "polymarket", start),
             raw={"order_books": [{
                 "bids": [{"price": "0.50", "size": "10"}],
@@ -424,6 +429,7 @@ class LiquidityTests(unittest.TestCase):
                 "event_name": "Player Two vs Player One",
                 "competitors": ["Player Two", "Player One"], "start_time": start,
                 "available_back": "5", "available_unmatched": "2",
+                "matched_volume": "42",
             }, "kalshi", start),
             raw={"orderbook": {
                 "yes_dollars": [["0.50", "10"]],
@@ -431,9 +437,9 @@ class LiquidityTests(unittest.TestCase):
             }},
         )
         comparison, = compare_liquidity_snapshots([polymarket, kalshi])
-        self.assertEqual(comparison.polymarket_liquidity, Decimal("9.80"))
-        self.assertEqual(comparison.kalshi_liquidity, Decimal("7.00"))
-        self.assertEqual(comparison.more_liquid, "Polymarket")
+        self.assertEqual(comparison.polymarket_volume, Decimal("130"))
+        self.assertEqual(comparison.kalshi_volume, Decimal("42"))
+        self.assertEqual(comparison.volume_leader, "Polymarket")
         self.assertEqual(comparison.confidence, 1.0)
         outside_window = replace(kalshi, start_time=start.replace(day=27))
         self.assertEqual(compare_liquidity_snapshots([polymarket, outside_window]), [])
@@ -482,6 +488,7 @@ class LiquidityTests(unittest.TestCase):
                 "event_id": "pm-event", "market_id": "pm-market",
                 "event_name": "Player One vs Player Two",
                 "competitors": ["Player One", "Player Two"], "start_time": start,
+                "matched_volume": "130",
             }, "polymarket", start),
             raw={"order_books": [{
                 "bids": [{"price": "0.50", "size": "10"}],
@@ -493,6 +500,7 @@ class LiquidityTests(unittest.TestCase):
                 "event_id": "k-event", "market_id": "k-market",
                 "event_name": "Player Two vs Player One",
                 "competitors": ["Player Two", "Player One"], "start_time": start,
+                "matched_volume": "42",
             }, "kalshi", start),
             raw={"orderbook": {
                 "yes_dollars": [["0.50", "10"]],
@@ -509,8 +517,8 @@ class LiquidityTests(unittest.TestCase):
                 main(["compare-liquidity", "--db", str(Path(directory) / "liquidity.sqlite3"), str(output)])
             self.assertIn(f"Exported 1 matched comparisons to {output}", captured.getvalue())
             text = output.read_text(encoding="utf-8")
-            self.assertIn("more_liquid", text)
-            self.assertIn("Polymarket", text)
+            self.assertIn("higher_reported_matched_volume", text)
+            self.assertIn("130", text)
 
     def test_ui_reads_current_comparison_results(self):
         start = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
@@ -518,17 +526,19 @@ class LiquidityTests(unittest.TestCase):
             "event_id": "pm-event", "market_id": "pm-market",
             "event_name": "Player One vs Player Two",
             "competitors": ["Player One", "Player Two"], "start_time": start,
+            "matched_volume": "130",
         }, "polymarket", start)
         kalshi = normalize_snapshot({
             "event_id": "k-event", "market_id": "k-market",
             "event_name": "Player Two vs Player One",
             "competitors": ["Player Two", "Player One"], "start_time": start,
+            "matched_volume": "42",
         }, "kalshi", start)
         polymarket = replace(polymarket, raw={"order_books": [{
             "bids": [{"price": "0.50", "size": "10"}],
             "asks": [{"price": "0.60", "size": "8"}],
         }]})
-        kalshi = replace(kalshi, raw={"orderbook": {
+        kalshi = replace(kalshi, phase=Phase.PRE_MATCH, raw={"orderbook": {
             "yes_dollars": [["0.50", "10"]], "no_dollars": [["0.40", "5"]],
         }})
         with tempfile.TemporaryDirectory() as directory:
@@ -538,9 +548,12 @@ class LiquidityTests(unittest.TestCase):
             connection.close()
             payload = LiquidityUI(db).results()
             self.assertEqual(len(payload["results"]), 1)
-            self.assertEqual(payload["results"][0]["more_liquid"], "Polymarket")
+            self.assertEqual(payload["results"][0]["volume_leader"], "Polymarket")
             comparison = payload["results"][0]
             self.assertEqual(comparison["id"], "pm-event|k-event")
+            self.assertEqual(comparison["polymarket_volume"], "130")
+            self.assertEqual(comparison["kalshi_volume"], "42")
+            self.assertEqual(comparison["phase"], "in_play")
             self.assertEqual(comparison["markets"]["polymarket"][0]["liquidity"], "9.80")
             self.assertEqual(comparison["markets"]["kalshi"][0]["liquidity"], "7.00")
             self.assertEqual(payload["distribution"], [{
@@ -551,15 +564,19 @@ class LiquidityTests(unittest.TestCase):
             }])
 
     def test_ui_supports_default_and_clickable_column_sorting(self):
-        self.assertIn('sortColumn="total", sortDirection="descending"', HTML)
+        self.assertIn('sortColumn="polymarket", sortDirection="descending"', HTML)
         self.assertIn('data-sort="match"', HTML)
         self.assertIn('data-sort="polymarket"', HTML)
         self.assertIn('data-sort="kalshi"', HTML)
-        self.assertIn('data-sort="difference"', HTML)
+        self.assertIn('data-sort="leader"', HTML)
         self.assertIn('sortDirection==="ascending"?"descending":"ascending"', HTML)
-        self.assertIn("Σ↓", HTML)
+        self.assertIn('sortDirection==="ascending"?"↑":"↓"', HTML)
+        self.assertIn('data-sort="leader"', HTML)
         self.assertIn('id="tournament-filter"', HTML)
+        self.assertIn('id="status-filter"', HTML)
+        self.assertIn('selectedStatus="both"', HTML)
         self.assertIn("selectedGrade===\"all\"", HTML)
+        self.assertIn("selectedStatus===\"both\"", HTML)
         self.assertIn('id="distribution"', HTML)
         self.assertIn("renderDistribution()", HTML)
         self.assertIn("expandedMatches=new Set()", HTML)
@@ -567,6 +584,7 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn("marketPanel(\"Polymarket\"", HTML)
         self.assertIn("marketPanel(\"Kalshi\"", HTML)
         self.assertIn("mini-bar", HTML)
+        self.assertIn('rowMarkup("Total",total,true)', HTML)
 
     def test_ui_liquidity_distribution_counts_ties_in_denominator(self):
         from tennis_betting.ui import _liquidity_distribution
@@ -579,6 +597,7 @@ class LiquidityTests(unittest.TestCase):
                 "competitors": competitors,
                 "start_time": start,
                 "available_back": amount,
+                "matched_volume": amount,
                 "grade": grade.value,
             }, provider, start)
 
