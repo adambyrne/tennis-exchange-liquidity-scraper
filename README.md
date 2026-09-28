@@ -44,6 +44,7 @@ Kalshi without accounts or credentials:
 python main.py scrape --once --db liquidity.sqlite3
 python main.py export-liquidity --db liquidity.sqlite3 liquidity.csv
 python main.py compare-liquidity --db liquidity.sqlite3 tennis-comparison.csv
+python main.py ui --db liquidity.sqlite3
 ```
 
 The default `all` provider collects from both venues. Select one explicitly
@@ -100,6 +101,13 @@ and NO bid levels from one player-winner market (price multiplied by contract
 quantity). This avoids counting complementary outcomes twice; it is a current
 order-book depth comparison, not traded volume, executable profit, or a
 guarantee that liquidity is available at one price.
+
+The `ui` command starts a small dependency-free local dashboard at
+`http://127.0.0.1:8000`. Open that address in a browser and use **Refresh data**
+to run both providers and refresh the comparison table. The dashboard shows
+the last update time, match count, USD liquidity on each venue, and a colored
+leader indicator. Use `--host` or `--port` if needed. Stop it with
+`Ctrl+C`.
 
 If Python reports a local certificate verification error on Windows, update the
 certificate bundle used by the adapter:

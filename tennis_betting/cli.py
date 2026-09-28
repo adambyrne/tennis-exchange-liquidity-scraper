@@ -11,6 +11,7 @@ from .providers import (
     PolymarketPublicLiquidityProvider,
 )
 from .scraper import collect_once, collection_summary, run_scheduler
+from .ui import serve
 from .storage import (
     connect_database, export_csv, export_liquidity_comparison_csv, export_liquidity_csv,
     export_liquidity_parquet, load_slip, save_slip,
@@ -56,6 +57,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     comparison.add_argument("--db", default="liquidity.sqlite3")
     comparison.add_argument("file")
+    ui = sub.add_parser("ui", help="open the local liquidity comparison dashboard")
+    ui.add_argument("--db", default="liquidity.sqlite3")
+    ui.add_argument("--host", default="127.0.0.1")
+    ui.add_argument("--port", type=int, default=8000)
     return parser
 
 
@@ -144,3 +149,5 @@ def main(argv: list[str] | None = None) -> None:
         finally:
             connection.close()
         print(f"Exported {count} matched comparisons to {args.file}")
+    elif args.command == "ui":
+        serve(args.db, args.host, args.port)
