@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
+from urllib.error import HTTPError
 
 from tennis_betting.cli import build_parser, main
 from tennis_betting.classification import classify_event
@@ -392,6 +394,26 @@ class LiquidityTests(unittest.TestCase):
         provider._get_json = get_json
         self.assertEqual(provider._market_traded_notional("market"), Decimal("7.800000"))
         self.assertEqual(requested_cursors, [None, "next-page"])
+
+    def test_kalshi_retries_rate_limited_request_and_honors_retry_after(self):
+        from email.message import Message
+        from io import BytesIO
+
+        provider = KalshiPublicLiquidityProvider(request_interval_seconds=0)
+        headers = Message()
+        headers["Retry-After"] = "7"
+        rate_limit = HTTPError(
+            "https://example.test", 429, "Too Many Requests", headers, None,
+        )
+        with (
+            patch("tennis_betting.providers.urllib.request.urlopen",
+                  side_effect=[rate_limit, BytesIO(b'{"ok":true}')]) as urlopen,
+            patch("tennis_betting.providers.time.sleep") as sleep,
+        ):
+            self.assertEqual(provider._get_json("markets/trades"), {"ok": True})
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once()
+        self.assertAlmostEqual(sleep.call_args.args[0], 7.0, places=2)
 
     def test_kalshi_discovers_challenger_series_and_collects_doubles_teams(self):
         provider = KalshiPublicLiquidityProvider(timeout_seconds=1)
