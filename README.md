@@ -119,8 +119,12 @@ aggregate total. The liquidity-range summary groups matches by combined
 amount in the active view (<5k, 5k-25k, 25k-100k, and 100k+) and shows counts
 and leader percentages. Expanded market rows also switch between matched
 market amounts and order-book depth; Polymarket matched volume is the market
-total shared across its outcome tokens. Older snapshots
-without per-market detail show their stored aggregate depth as a fallback.
+total shared across its outcome tokens. Older snapshots without per-market
+detail show their stored aggregate depth as a fallback.
+The view switch sits beside **Refresh data**; tournament and status controls
+are grouped with a reset action, followed by the two summary cards. Match rows
+show tournament/status badges and can be expanded to compare venue-specific
+market details. Refreshing uses skeleton rows and a completion indicator.
 Doubles teams are matched as pairs, including abbreviated
 Polymarket names, and Kalshi ATP Challenger series are included even when the
 series title omits the word "match". Use `--host` or `--port` if needed.
