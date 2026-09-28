@@ -334,6 +334,61 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(snapshot.grade, CompetitionGrade.ATP)
         self.assertEqual(snapshot.raw["orderbook"]["yes_dollars"][0], ["0.5000", "10.00"])
 
+    def test_kalshi_discovers_challenger_series_and_collects_doubles_teams(self):
+        provider = KalshiPublicLiquidityProvider(timeout_seconds=1)
+        events_by_series = {
+            "KXATPCHALLENGERMATCH": [{
+                "event_ticker": "challenge-single",
+                "title": "Angelini vs Johns",
+                "markets": [
+                    {"ticker": "angelini", "title": "Lorenzo Angelini wins",
+                     "open_time": "2026-09-28T10:00:00Z", "status": "active"},
+                    {"ticker": "johns", "title": "Garrett Johns wins",
+                     "open_time": "2026-09-28T10:00:00Z", "status": "active"},
+                ],
+            }],
+            "KXATPCHALLENGERDOUBLES": [{
+                "event_ticker": "challenge-doubles",
+                "title": "Poullain / Reco vs Broady / Hudd",
+                "markets": [
+                    {"ticker": "team-one", "title": "Lucas Poullain / Alexandre Reco wins",
+                     "open_time": "2026-09-28T16:00:00Z", "status": "active"},
+                    {"ticker": "team-two", "title": "Liam Broady / Emile Hudd wins",
+                     "open_time": "2026-09-28T16:00:00Z", "status": "active"},
+                ],
+            }],
+        }
+
+        def get_json(path, params=None):
+            if path == "series":
+                return {"series": [
+                    {"ticker": "KXATPCHALLENGERMATCH", "title": "Challenger ATP", "tags": ["Tennis"]},
+                    {"ticker": "KXATPCHALLENGERDOUBLES", "title": "ATP Challenger Doubles Match",
+                     "tags": ["Tennis"]},
+                    {"ticker": "KXATPSETMATCH", "title": "ATP Set Winner", "tags": ["Tennis"]},
+                ]}
+            if path == "events":
+                return {
+                    "events": events_by_series[params["series_ticker"]],
+                    "cursor": "",
+                }
+            return {"orderbook_fp": {
+                "yes_dollars": [["0.50", "20"]],
+                "no_dollars": [["0.40", "10"]],
+            }}
+
+        provider._get_json = get_json
+        snapshots = provider.snapshots(datetime(2026, 9, 28, 9, tzinfo=timezone.utc))
+        self.assertEqual(len(snapshots), 2)
+        by_id = {snapshot.source_event_id: snapshot for snapshot in snapshots}
+        self.assertEqual(by_id["challenge-single"].grade, CompetitionGrade.ATP_CHALLENGER)
+        doubles = by_id["challenge-doubles"]
+        self.assertEqual(doubles.grade, CompetitionGrade.ATP_CHALLENGER)
+        self.assertEqual(doubles.competitor_names, (
+            "Lucas Poullain / Alexandre Reco",
+            "Liam Broady / Emile Hudd",
+        ))
+
     def test_cross_venue_comparison_uses_conservative_match_and_depth(self):
         start = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
         polymarket = replace(
@@ -366,6 +421,31 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(comparison.confidence, 1.0)
         outside_window = replace(kalshi, start_time=start.replace(day=27))
         self.assertEqual(compare_liquidity_snapshots([polymarket, outside_window]), [])
+
+    def test_cross_venue_matching_supports_abbreviated_doubles_teams(self):
+        start = datetime(2026, 9, 28, 16, tzinfo=timezone.utc)
+        polymarket = normalize_snapshot({
+            "event_id": "pm-doubles", "market_id": "pm-doubles",
+            "event_name": "Mouilleron-Le-Captif (Doubles): Poullain/Reco vs Broady/Hudd",
+            "competitors": PolymarketPublicLiquidityProvider._competitors(
+                "Mouilleron-Le-Captif (Doubles): Poullain/Reco vs Broady/Hudd",
+            ),
+            "start_time": start,
+            "available_back": "50",
+        }, "polymarket", start)
+        kalshi = normalize_snapshot({
+            "event_id": "kalshi-doubles", "market_id": "kalshi-doubles",
+            "event_name": "Poullain / Reco vs Broady / Hudd",
+            "competitors": [
+                "Lucas Poullain / Alexandre Reco",
+                "Liam Broady / Emile Hudd",
+            ],
+            "start_time": start.replace(hour=4),
+            "available_back": "30",
+            "grade": CompetitionGrade.ATP_CHALLENGER.value,
+        }, "kalshi", start)
+        comparison, = compare_liquidity_snapshots([polymarket, kalshi])
+        self.assertEqual(comparison.confidence, 0.96)
 
     def test_cross_venue_comparison_rejects_ambiguous_matches(self):
         start = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
@@ -443,9 +523,12 @@ class LiquidityTests(unittest.TestCase):
             payload = LiquidityUI(db).results()
             self.assertEqual(len(payload["results"]), 1)
             self.assertEqual(payload["results"][0]["more_liquid"], "Polymarket")
-            self.assertEqual(payload["distribution"], {
-                "polymarket_percent": "100%", "kalshi_percent": "0%",
-            })
+            self.assertEqual(payload["distribution"], [{
+                "tournament_type": "unknown",
+                "polymarket_percent": "100%",
+                "kalshi_percent": "0%",
+                "total_matches": 1,
+            }])
 
     def test_ui_supports_default_and_clickable_column_sorting(self):
         self.assertIn('sortColumn="total", sortDirection="descending"', HTML)
@@ -455,32 +538,56 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn('data-sort="difference"', HTML)
         self.assertIn('sortDirection==="ascending"?"descending":"ascending"', HTML)
         self.assertIn("Σ↓", HTML)
+        self.assertIn('id="tournament-filter"', HTML)
+        self.assertIn("selectedGrade===\"all\"", HTML)
+        self.assertIn('id="distribution"', HTML)
+        self.assertIn("renderDistribution()", HTML)
 
     def test_ui_liquidity_distribution_counts_ties_in_denominator(self):
         from tennis_betting.ui import _liquidity_distribution
 
         start = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
-        def snapshot(provider, market_id, amount, competitors):
+        def snapshot(provider, market_id, amount, competitors, grade):
             return normalize_snapshot({
                 "event_id": market_id, "market_id": market_id,
                 "event_name": " vs ".join(competitors),
                 "competitors": competitors,
                 "start_time": start,
                 "available_back": amount,
+                "grade": grade.value,
             }, provider, start)
 
         comparisons = compare_liquidity_snapshots([
-            snapshot("polymarket", "pm-win", "20", ["Player One", "Player Two"]),
-            snapshot("kalshi", "k-pm-win", "10", ["Player Two", "Player One"]),
-            snapshot("polymarket", "pm-kalshi", "5", ["Player Three", "Player Four"]),
-            snapshot("kalshi", "k-win", "15", ["Player Four", "Player Three"]),
-            snapshot("polymarket", "pm-tie", "10", ["Player Five", "Player Six"]),
-            snapshot("kalshi", "k-tie", "10", ["Player Six", "Player Five"]),
+            snapshot("polymarket", "pm-win", "20", ["Player One", "Player Two"],
+                     CompetitionGrade.ATP_CHALLENGER),
+            snapshot("kalshi", "k-pm-win", "10", ["Player Two", "Player One"],
+                     CompetitionGrade.ATP_CHALLENGER),
+            snapshot("polymarket", "pm-kalshi", "5", ["Player Three", "Player Four"],
+                     CompetitionGrade.ITF),
+            snapshot("kalshi", "k-win", "15", ["Player Four", "Player Three"],
+                     CompetitionGrade.ITF),
+            snapshot("polymarket", "pm-tie", "10", ["Player Five", "Player Six"],
+                     CompetitionGrade.WTA),
+            snapshot("kalshi", "k-tie", "10", ["Player Six", "Player Five"],
+                     CompetitionGrade.WTA),
         ])
         self.assertEqual(len(comparisons), 3)
-        self.assertEqual(_liquidity_distribution(comparisons), {
-            "polymarket_percent": "33%", "kalshi_percent": "33%",
-        })
+        self.assertEqual(_liquidity_distribution(comparisons), [{
+            "tournament_type": "atp_challenger",
+            "polymarket_percent": "100%",
+            "kalshi_percent": "0%",
+            "total_matches": 1,
+        }, {
+            "tournament_type": "itf",
+            "polymarket_percent": "0%",
+            "kalshi_percent": "100%",
+            "total_matches": 1,
+        }, {
+            "tournament_type": "wta",
+            "polymarket_percent": "0%",
+            "kalshi_percent": "0%",
+            "total_matches": 1,
+        }])
 
 
 if __name__ == "__main__":

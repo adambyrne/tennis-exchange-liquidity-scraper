@@ -280,7 +280,7 @@ class KalshiPublicLiquidityProvider:
             if (
                 ticker
                 and "tennis" in {tag.casefold() for tag in tag_names}
-                and "match" in title_lower
+                and ("match" in title_lower or ticker.casefold().endswith("match"))
                 and not any(term in title_lower for term in self._excluded_series_terms)
             ):
                 series.append((ticker, title))
