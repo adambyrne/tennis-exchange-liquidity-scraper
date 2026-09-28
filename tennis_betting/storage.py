@@ -143,8 +143,8 @@ def export_liquidity_comparison_csv(connection: sqlite3.Connection, path: str | 
     fieldnames = [
         "competitors", "polymarket_event", "kalshi_event",
         "polymarket_start_time", "kalshi_start_time",
-        "polymarket_visible_liquidity_usd", "kalshi_visible_liquidity_usd",
-        "more_liquid", "difference_usd", "match_confidence",
+        "polymarket_matched_volume_usd", "kalshi_matched_volume_contracts",
+        "higher_reported_matched_volume", "match_confidence",
     ]
     with Path(path).open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -156,10 +156,9 @@ def export_liquidity_comparison_csv(connection: sqlite3.Connection, path: str | 
                 "kalshi_event": comparison.kalshi.event_name,
                 "polymarket_start_time": comparison.polymarket.start_time.isoformat(),
                 "kalshi_start_time": comparison.kalshi.start_time.isoformat(),
-                "polymarket_visible_liquidity_usd": comparison.polymarket_liquidity,
-                "kalshi_visible_liquidity_usd": comparison.kalshi_liquidity,
-                "more_liquid": comparison.more_liquid,
-                "difference_usd": comparison.difference,
+                "polymarket_matched_volume_usd": comparison.polymarket_volume,
+                "kalshi_matched_volume_contracts": comparison.kalshi_volume,
+                "higher_reported_matched_volume": comparison.volume_leader,
                 "match_confidence": f"{comparison.confidence:.3f}",
             })
     return len(comparisons)

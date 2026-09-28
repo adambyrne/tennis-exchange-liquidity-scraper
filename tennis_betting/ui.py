@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .matching import LiquidityComparison
+from .matching import LiquidityComparison, displayed_orderbook_depth
 from .models import LiquiditySnapshot
 from .providers import KalshiPublicLiquidityProvider, PolymarketPublicLiquidityProvider
 from .scraper import collect_once
@@ -18,7 +18,7 @@ from .storage import connect_database, load_latest_comparisons
 
 HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tennis liquidity comparison</title>
+<title>Tennis matched-volume comparison</title>
 <style>
 :root{font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#172033;background:#f5f7fb}
 *{box-sizing:border-box}body{margin:0}.shell{max-width:1180px;margin:auto;padding:32px 18px}
@@ -30,6 +30,8 @@ button:disabled{opacity:.6;cursor:wait}.meta{display:flex;gap:16px;flex-wrap:wra
 .actions{display:flex;align-items:center;gap:12px}.distribution{background:linear-gradient(135deg,#fff 35%,#f0f5ff);border:1px solid #dfe7f5;border-radius:14px;padding:10px 12px;max-width:100%;overflow-x:auto;box-shadow:0 8px 22px #18376010}
 .distribution table{border-collapse:collapse;min-width:340px;width:auto}.distribution th,.distribution td{padding:6px 8px;border-bottom:1px solid #e9eef7;font-size:.72rem;white-space:nowrap}
 .distribution th{font-size:.62rem;letter-spacing:.06em}.distribution td.num{text-align:right;font-variant-numeric:tabular-nums}
+.distribution tr.total-row td{border-top:2px solid #cfd9e9;font-weight:800;background:#f7f9fe}
+.unit-note{font-size:.65rem!important;margin:6px 8px 0;color:#718096!important}
 .grade-chip{display:inline-block;padding:3px 7px;border-radius:99px;background:#edf2ff;color:#344f9a;font-size:.68rem;font-weight:700}
 .share-cell{display:flex;align-items:center;justify-content:flex-end;gap:6px}.mini-bar{display:inline-block;width:38px;height:5px;background:#e8edf5;border-radius:10px;overflow:hidden}
 .mini-bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#60a5fa,#2563eb)}.mini-bar.kalshi i{background:linear-gradient(90deg,#fbbf24,#d97706)}
@@ -53,49 +55,54 @@ td{font-variant-numeric:tabular-nums}.match{font-weight:700}.sub{font-size:.8rem
 @media(max-width:720px){.market-panels{grid-template-columns:1fr}.distribution{width:100%}}
 @media(max-width:650px){.shell{padding:22px 12px}header{align-items:flex-start;flex-direction:column}.actions{width:100%;align-items:stretch;flex-direction:column}.distribution{justify-content:space-around}button#run{width:100%}}
 </style></head>
-<body><main class="shell"><header><div><h1>Tennis liquidity</h1><p>Current displayed order-book depth across Polymarket and Kalshi.</p></div>
-<div class="actions"><section class="distribution" aria-label="Liquidity distribution by tournament">
+<body><main class="shell"><header><div><h1>Tennis market volume</h1><p>Provider-reported matched volume; expand a match to inspect current order-book depth.</p></div>
+<div class="actions"><section class="distribution" aria-label="Reported matched-volume distribution by tournament">
 <table><thead><tr><th>Tournament Type</th><th>Polymarket %</th><th>Kalshi %</th><th>Total Matches</th></tr></thead>
 <tbody id="distribution"><tr><td colspan="4">No matched data</td></tr></tbody></table>
+<p class="unit-note">Provider-reported volume uses USD on Polymarket and contracts on Kalshi; comparison is indicative only.</p>
 </section><button id="run" onclick="runScraper()">Refresh data</button></div></header>
 <div id="notice" class="notice"></div><div class="meta"><span>Last updated: <strong id="updated">-</strong></span><span>Matches: <strong id="count">0</strong></span></div>
 <label class="filter" for="tournament-filter">Tournament type
 <select id="tournament-filter"><option value="all">All tournaments</option></select></label>
+<label class="filter" for="status-filter">Match status
+<select id="status-filter"><option value="both">Both</option><option value="pre_match">Pre-Match</option><option value="in_play">In-Play</option></select></label>
 <section class="card"><div class="table-wrap"><table><thead><tr>
 <th><button data-sort="match">Match <span class="sort-indicator"></span></button></th>
-<th><button data-sort="polymarket">Polymarket <span class="sort-indicator"></span></button></th>
-<th><button data-sort="kalshi">Kalshi <span class="sort-indicator"></span></button></th>
-<th><button data-sort="difference">Difference / leader <span class="sort-indicator"></span></button></th>
+<th><button data-sort="polymarket">Polymarket volume (USD) <span class="sort-indicator"></span></button></th>
+<th><button data-sort="kalshi">Kalshi volume (contracts) <span class="sort-indicator"></span></button></th>
+<th><button data-sort="leader">Reported-volume leader* <span class="sort-indicator"></span></button></th>
 </tr></thead>
 <tbody id="rows"><tr><td colspan="4" class="empty">No matched data yet. Run the scraper to load results.</td></tr></tbody></table></div></section></main>
 <script>
-const money = value => new Intl.NumberFormat(undefined,{style:"currency",currency:"USD",maximumFractionDigits:2}).format(Number(value)||0);
+const number = value => new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(Number(value)||0);
 const esc = value => String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-let currentResults=[], sortColumn="total", sortDirection="descending", selectedGrade="all", expandedMatches=new Set();
+let currentResults=[], sortColumn="polymarket", sortDirection="descending", selectedGrade="all", selectedStatus="both", expandedMatches=new Set();
 function show(message, kind){const n=document.getElementById("notice");n.textContent=message;n.className="notice show "+kind}
 const gradeLabel=grade=>({grand_slam:"Grand Slam",atp:"ATP",wta:"WTA",atp_challenger:"ATP Challenger",itf:"ITF",utr:"UTR",unknown:"Unknown"}[grade]||grade.toUpperCase());
-function updateSortIndicators(){document.querySelectorAll("th button[data-sort]").forEach(button=>{const active=button.dataset.sort===sortColumn;const defaultTotal=sortColumn==="total"&&button.dataset.sort==="match";button.setAttribute("aria-sort",defaultTotal?"other":active?sortDirection:"none");const indicator=button.querySelector(".sort-indicator");indicator.textContent=defaultTotal?(sortDirection==="ascending"?"Σ↑":"Σ↓"):active?(sortDirection==="ascending"?"↑":"↓"):"";indicator.title=defaultTotal?"Sorted by combined liquidity":"";button.setAttribute("aria-label",defaultTotal?"Match; sorted by combined liquidity descending":button.textContent.trim())})}
-function filteredResults(){return selectedGrade==="all"?currentResults:currentResults.filter(result=>result.grade===selectedGrade)}
+function updateSortIndicators(){document.querySelectorAll("th button[data-sort]").forEach(button=>{const active=button.dataset.sort===sortColumn;button.setAttribute("aria-sort",active?sortDirection:"none");const indicator=button.querySelector(".sort-indicator");indicator.textContent=active?(sortDirection==="ascending"?"↑":"↓"):"";button.setAttribute("aria-label",button.textContent.trim())})}
+function filteredResults(){return currentResults.filter(result=>(selectedGrade==="all"||result.grade===selectedGrade)&&(selectedStatus==="both"||result.phase===selectedStatus))}
 function sortedResults(){const sign=sortDirection==="ascending"?1:-1;return [...filteredResults()].sort((a,b)=>{let left,right;
- if(sortColumn==="total"){left=Number(a.polymarket_liquidity)+Number(a.kalshi_liquidity);right=Number(b.polymarket_liquidity)+Number(b.kalshi_liquidity)}
- else if(sortColumn==="polymarket"){left=Number(a.polymarket_liquidity);right=Number(b.polymarket_liquidity)}
- else if(sortColumn==="kalshi"){left=Number(a.kalshi_liquidity);right=Number(b.kalshi_liquidity)}
- else if(sortColumn==="difference"){left=Number(a.difference);right=Number(b.difference)}
+ if(sortColumn==="polymarket"){left=Number(a.polymarket_volume);right=Number(b.polymarket_volume)}
+ else if(sortColumn==="kalshi"){left=Number(a.kalshi_volume);right=Number(b.kalshi_volume)}
+ else if(sortColumn==="leader"){left=a.volume_leader;right=b.volume_leader}
  else {left=a.competitors.toLocaleLowerCase();right=b.competitors.toLocaleLowerCase()}
  const result=typeof left==="string"?left.localeCompare(right):left-right;return result===0?a.competitors.localeCompare(b.competitors):result*sign})}
-function marketPanel(title,markets,venue){const body=markets.length?markets.map(m=>`<div class="market-item"><span><span class="market-name">${esc(m.name||"Match Winner")}</span>${m.selection?`<span class="market-selection">${esc(m.selection)}</span>`:""}</span><span class="market-amount">${money(m.liquidity)} ${esc(m.currency||"USD")}</span></div>`).join(""):'<div class="sub">No market details available in this snapshot.</div>';return `<section class="market-panel"><h3 class="${venue}">${esc(title)}</h3>${body}</section>`}
-function renderRows(){const results=filteredResults(),rows=document.getElementById("rows");document.getElementById("count").textContent=results.length;if(!results.length){rows.innerHTML='<tr><td colspan="4" class="empty">No conservatively matched fixtures found for this tournament type.</td></tr>';return}
- rows.innerHTML=sortedResults().map(r=>{const pm=Number(r.polymarket_liquidity),ka=Number(r.kalshi_liquidity),winner=r.more_liquid==="Tie"?"Tie":r.more_liquid+" higher";const cls=r.more_liquid==="Polymarket"?"pm":r.more_liquid==="Kalshi"?"ka":"tie",expanded=expandedMatches.has(r.id);
- const summary=`<tr><td><button class="expand-button" data-expand="${esc(r.id)}" aria-expanded="${expanded}" aria-label="${expanded?"Collapse":"Expand"} market details">›</button><span class="match">${esc(r.competitors)}</span><div class="sub">${esc(gradeLabel(r.grade))} · ${esc(r.phase)}</div></td><td class="${r.more_liquid==="Polymarket"?"winner":""}">${money(pm)}</td><td class="${r.more_liquid==="Kalshi"?"winner":""}">${money(ka)}</td><td class="${cls}">${money(r.difference)} <span class="badge">${esc(winner)}</span></td></tr>`;
+function marketPanel(title,markets,venue){const body=markets.length?markets.map(m=>`<div class="market-item"><span><span class="market-name">${esc(m.name||"Match Winner")}</span>${m.selection?`<span class="market-selection">${esc(m.selection)}</span>`:""}</span><span class="market-amount">${number(m.liquidity)} ${esc(m.currency||"USD")}</span></div>`).join(""):'<div class="sub">No market details available in this snapshot.</div>';return `<section class="market-panel"><h3 class="${venue}">${esc(title)} order-book depth</h3>${body}</section>`}
+function renderRows(){const results=filteredResults(),rows=document.getElementById("rows");document.getElementById("count").textContent=results.length;if(!results.length){rows.innerHTML='<tr><td colspan="4" class="empty">No conservatively matched fixtures found for these filters.</td></tr>';return}
+ rows.innerHTML=sortedResults().map(r=>{const pm=Number(r.polymarket_volume),ka=Number(r.kalshi_volume),winner=r.volume_leader==="Tie"?"Tie":r.volume_leader+" higher";const cls=r.volume_leader==="Polymarket"?"pm":r.volume_leader==="Kalshi"?"ka":"tie",expanded=expandedMatches.has(r.id);
+ const summary=`<tr><td><button class="expand-button" data-expand="${esc(r.id)}" aria-expanded="${expanded}" aria-label="${expanded?"Collapse":"Expand"} market details">›</button><span class="match">${esc(r.competitors)}</span><div class="sub">${esc(gradeLabel(r.grade))} · ${esc(r.phase)}</div></td><td class="${r.volume_leader==="Polymarket"?"winner":""}">${number(pm)} USD</td><td class="${r.volume_leader==="Kalshi"?"winner":""}">${number(ka)} contracts</td><td class="${cls}"><span class="badge">${esc(winner)}</span></td></tr>`;
  const details=`<tr class="details-row" data-detail-for="${esc(r.id)}" ${expanded?"":"hidden"}><td colspan="4" class="detail-cell"><div class="market-panels">${marketPanel("Polymarket",r.markets.polymarket,"pm")}${marketPanel("Kalshi",r.markets.kalshi,"ka")}</div></td></tr>`;
  return summary+details}).join("")}
-function renderDistribution(){const grouped=new Map();for(const result of filteredResults()){const grade=result.grade||"unknown";if(!grouped.has(grade))grouped.set(grade,{total:0,pm:0,kalshi:0});const row=grouped.get(grade);row.total++;if(result.more_liquid==="Polymarket")row.pm++;if(result.more_liquid==="Kalshi")row.kalshi++}
+function renderDistribution(){const grouped=new Map();for(const result of filteredResults()){const grade=result.grade||"unknown";if(!grouped.has(grade))grouped.set(grade,{total:0,pm:0,kalshi:0});const row=grouped.get(grade);row.total++;if(result.volume_leader==="Polymarket")row.pm++;if(result.volume_leader==="Kalshi")row.kalshi++}
  const body=document.getElementById("distribution");if(!grouped.size){body.innerHTML='<tr><td colspan="4">No matched data</td></tr>';return}
- body.innerHTML=[...grouped.entries()].sort((a,b)=>gradeLabel(a[0]).localeCompare(gradeLabel(b[0]))).map(([grade,row])=>{const pm=Math.round(row.pm/row.total*100),kalshi=Math.round(row.kalshi/row.total*100);return `<tr><td><span class="grade-chip">${esc(gradeLabel(grade))}</span></td><td><div class="share-cell">${pm}%<span class="mini-bar"><i style="width:${pm}%"></i></span></div></td><td><div class="share-cell">${kalshi}%<span class="mini-bar kalshi"><i style="width:${kalshi}%"></i></span></div></td><td class="num">${row.total}</td></tr>`}).join("")}
+ const total=[...grouped.values()].reduce((sum,row)=>({total:sum.total+row.total,pm:sum.pm+row.pm,kalshi:sum.kalshi+row.kalshi}),{total:0,pm:0,kalshi:0});
+ const rowMarkup=(label,row,totalRow=false)=>{const pm=Math.round(row.pm/row.total*100),kalshi=Math.round(row.kalshi/row.total*100);return `<tr class="${totalRow?"total-row":""}"><td><span class="grade-chip">${esc(label)}</span></td><td><div class="share-cell">${pm}%<span class="mini-bar"><i style="width:${pm}%"></i></span></div></td><td><div class="share-cell">${kalshi}%<span class="mini-bar kalshi"><i style="width:${kalshi}%"></i></span></div></td><td class="num">${row.total}</td></tr>`};
+ body.innerHTML=[...grouped.entries()].sort((a,b)=>gradeLabel(a[0]).localeCompare(gradeLabel(b[0]))).map(([grade,row])=>rowMarkup(gradeLabel(grade),row)).join("")+rowMarkup("Total",total,true)}
 function render(data){currentResults=data.results||[];document.getElementById("updated").textContent=data.updated_at?new Date(data.updated_at).toLocaleString():"-";const filter=document.getElementById("tournament-filter"),previous=selectedGrade,grades=[...new Set(currentResults.map(result=>result.grade||"unknown"))].sort();filter.innerHTML='<option value="all">All tournaments</option>'+grades.map(grade=>`<option value="${esc(grade)}">${esc(gradeLabel(grade))}</option>`).join("");selectedGrade=grades.includes(previous)?previous:"all";filter.value=selectedGrade;updateSortIndicators();renderRows();renderDistribution()}
 document.querySelectorAll("th button[data-sort]").forEach(button=>button.addEventListener("click",()=>{if(sortColumn===button.dataset.sort)sortDirection=sortDirection==="ascending"?"descending":"ascending";else{sortColumn=button.dataset.sort;sortDirection="ascending"}updateSortIndicators();renderRows()}));updateSortIndicators();
 document.getElementById("rows").addEventListener("click",event=>{const button=event.target.closest("button[data-expand]");if(!button)return;const id=button.dataset.expand;if(expandedMatches.has(id))expandedMatches.delete(id);else expandedMatches.add(id);const details=document.querySelector(`[data-detail-for="${CSS.escape(id)}"]`);if(details)details.hidden=!expandedMatches.has(id);button.setAttribute("aria-expanded",String(expandedMatches.has(id)));button.setAttribute("aria-label",expandedMatches.has(id)?"Collapse market details":"Expand market details")});
 document.getElementById("tournament-filter").addEventListener("change",event=>{selectedGrade=event.target.value;renderRows();renderDistribution()});
+document.getElementById("status-filter").addEventListener("change",event=>{selectedStatus=event.target.value;renderRows();renderDistribution()});
 async function load(){const response=await fetch("/api/results");if(response.ok)render(await response.json())}
 async function runScraper(){const button=document.getElementById("run");button.disabled=true;button.textContent="Refreshing…";show("Collecting current markets from Polymarket and Kalshi…","success");
  try{const response=await fetch("/api/scrape",{method:"POST"});const data=await response.json();if(!response.ok)throw new Error(data.error||"Scrape failed");show(`Scrape complete: ${data.count} snapshots collected.`,"success");render(data)}catch(error){show(error.message,"error")}finally{button.disabled=false;button.textContent="Refresh data"}}
@@ -105,7 +112,7 @@ load();
 
 def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
     def market_details(
-        snapshot: LiquiditySnapshot, visible_liquidity: Any,
+        snapshot: LiquiditySnapshot,
     ) -> list[dict[str, str]]:
         details = snapshot.raw.get("ui_markets")
         if isinstance(details, list) and details:
@@ -121,10 +128,16 @@ def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
         return [{
             "name": snapshot.market_name,
             "selection": "",
-            "liquidity": str(visible_liquidity),
+            "liquidity": str(displayed_orderbook_depth(snapshot)),
             "currency": snapshot.currency,
         }]
 
+    phases = {comparison.polymarket.phase.value, comparison.kalshi.phase.value}
+    phase = (
+        "in_play" if "in_play" in phases
+        else "pre_match" if phases == {"pre_match"}
+        else "unknown"
+    )
     return {
         "id": f"{comparison.polymarket.source_event_id}|{comparison.kalshi.source_event_id}",
         "competitors": " vs ".join(comparison.polymarket.competitor_names),
@@ -133,15 +146,14 @@ def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
             if comparison.polymarket.grade.value != "unknown"
             else comparison.kalshi.grade
         ).value,
-        "phase": comparison.polymarket.phase.value,
-        "polymarket_liquidity": str(comparison.polymarket_liquidity),
-        "kalshi_liquidity": str(comparison.kalshi_liquidity),
-        "difference": str(comparison.difference),
-        "more_liquid": comparison.more_liquid,
+        "phase": phase,
+        "polymarket_volume": str(comparison.polymarket_volume),
+        "kalshi_volume": str(comparison.kalshi_volume),
+        "volume_leader": comparison.volume_leader,
         "match_confidence": comparison.confidence,
         "markets": {
-            "polymarket": market_details(comparison.polymarket, comparison.polymarket_liquidity),
-            "kalshi": market_details(comparison.kalshi, comparison.kalshi_liquidity),
+            "polymarket": market_details(comparison.polymarket),
+            "kalshi": market_details(comparison.kalshi),
         },
     }
 
@@ -156,8 +168,8 @@ def _liquidity_distribution(comparisons: list[LiquidityComparison]) -> list[dict
         ).value
         row = grouped.setdefault(grade, {"total": 0, "polymarket_wins": 0, "kalshi_wins": 0})
         row["total"] += 1
-        row["polymarket_wins"] += comparison.more_liquid == "Polymarket"
-        row["kalshi_wins"] += comparison.more_liquid == "Kalshi"
+        row["polymarket_wins"] += comparison.volume_leader == "Polymarket"
+        row["kalshi_wins"] += comparison.volume_leader == "Kalshi"
     result = []
     for grade, row in sorted(grouped.items()):
         total = row["total"]

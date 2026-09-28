@@ -409,6 +409,13 @@ class KalshiPublicLiquidityProvider:
         )
         yes_liquidity = self._side_notional(orderbook.get("yes_dollars"))
         no_liquidity = self._side_notional(orderbook.get("no_dollars"))
+        matched_volume = sum(
+            (
+                Decimal(str(winner_market.get("volume_fp") or winner_market.get("volume", 0)))
+                for winner_market in winner_markets
+            ),
+            Decimal("0"),
+        )
         ui_markets = [
             {
                 "name": str(winner_market.get("title") or "Match Winner"),
@@ -432,7 +439,7 @@ class KalshiPublicLiquidityProvider:
             "start_time": market.get("open_time") or observed.isoformat(),
             "available_back": yes_liquidity,
             "available_unmatched": no_liquidity,
-            "matched_volume": market.get("volume_fp") or market.get("volume", 0),
+            "matched_volume": matched_volume,
             "grade": grade.value,
             "currency": "USD",
             "source_url": f"https://kalshi.com/markets/{series_ticker}/{event_ticker}/{market_ticker}",
