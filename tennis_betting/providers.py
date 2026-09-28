@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 import json
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from decimal import Decimal
 from typing import Protocol
 
@@ -23,7 +25,9 @@ except ImportError:  # pragma: no cover - depends on the host Python installatio
 
 _MAX_CONCURRENT_REQUESTS = 8
 _MAX_CONCURRENT_DISCOVERY_REQUESTS = 4
-_RATE_LIMIT_RETRIES = 3
+_RATE_LIMIT_RETRIES = 6
+_KALSHI_REQUEST_INTERVAL_SECONDS = 0.25
+_MAX_RATE_LIMIT_DELAY_SECONDS = 120.0
 
 
 def _rate_limit_delay(error: urllib.error.HTTPError, attempt: int) -> float:
@@ -31,8 +35,12 @@ def _rate_limit_delay(error: urllib.error.HTTPError, attempt: int) -> float:
     try:
         delay = float(retry_after) if retry_after is not None else float(2 ** attempt)
     except ValueError:
-        delay = float(2 ** attempt)
-    return min(max(delay, 0.0), 30.0)
+        try:
+            retry_at = parsedate_to_datetime(retry_after)
+            delay = (retry_at - datetime.now(retry_at.tzinfo or timezone.utc)).total_seconds()
+        except (TypeError, ValueError, OverflowError):
+            delay = float(2 ** attempt)
+    return min(max(delay, 0.0), _MAX_RATE_LIMIT_DELAY_SECONDS)
 
 
 class ProviderError(RuntimeError):
@@ -261,10 +269,35 @@ class KalshiPublicLiquidityProvider:
     endpoint = "https://api.elections.kalshi.com/trade-api/v2"
     _excluded_series_terms = ("table tennis", "pickleball", "tiebreak", "set", "game", "score", "total")
 
-    def __init__(self, max_events: int | None = None, timeout_seconds: float = 15) -> None:
+    def __init__(
+        self,
+        max_events: int | None = None,
+        timeout_seconds: float = 15,
+        request_interval_seconds: float = _KALSHI_REQUEST_INTERVAL_SECONDS,
+    ) -> None:
+        if request_interval_seconds < 0:
+            raise ValueError("request interval cannot be negative")
         self.max_events = max_events
         self.timeout_seconds = timeout_seconds
+        self.request_interval_seconds = request_interval_seconds
         self._series_cache: list[tuple[str, str]] | None = None
+        self._request_gate = threading.Lock()
+        self._next_request_at = 0.0
+        self._cooldown_until = 0.0
+
+    def _wait_for_request_slot(self) -> None:
+        with self._request_gate:
+            now = time.monotonic()
+            request_at = max(self._next_request_at, self._cooldown_until)
+            if request_at > now:
+                time.sleep(request_at - now)
+            self._next_request_at = time.monotonic() + self.request_interval_seconds
+
+    def _set_rate_limit_cooldown(self, delay: float) -> None:
+        with self._request_gate:
+            self._cooldown_until = max(
+                self._cooldown_until, time.monotonic() + delay,
+            )
 
     def _get_json(self, path: str, params: dict[str, object] | None = None) -> object:
         query = urllib.parse.urlencode(params or {})
@@ -279,11 +312,12 @@ class KalshiPublicLiquidityProvider:
         context = ssl.create_default_context(cafile=certifi.where()) if certifi else None
         for attempt in range(_RATE_LIMIT_RETRIES + 1):
             try:
+                self._wait_for_request_slot()
                 with urllib.request.urlopen(request, timeout=self.timeout_seconds, context=context) as response:
                     return json.loads(response.read().decode("utf-8"))
             except urllib.error.HTTPError as error:
                 if error.code == 429 and attempt < _RATE_LIMIT_RETRIES:
-                    time.sleep(_rate_limit_delay(error, attempt))
+                    self._set_rate_limit_cooldown(_rate_limit_delay(error, attempt))
                     continue
                 raise ProviderError(f"Kalshi request failed for {url}: HTTP {error.code}") from error
             except (OSError, ValueError) as error:
