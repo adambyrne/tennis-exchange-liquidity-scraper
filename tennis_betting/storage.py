@@ -134,6 +134,8 @@ def load_latest_comparisons(connection: sqlite3.Connection):
             raw=json.loads(row["raw_json"]),
         )
         for row in rows
+        if row["provider"] != "kalshi"
+        or json.loads(row["raw_json"]).get("matched_volume_basis") == "trade_notional_usd"
     ]
     return compare_liquidity_snapshots(snapshots)
 
@@ -143,8 +145,8 @@ def export_liquidity_comparison_csv(connection: sqlite3.Connection, path: str | 
     fieldnames = [
         "competitors", "polymarket_event", "kalshi_event",
         "polymarket_start_time", "kalshi_start_time",
-        "polymarket_matched_volume_usd", "kalshi_matched_volume_contracts",
-        "higher_reported_matched_volume", "match_confidence",
+        "polymarket_matched_volume_usd", "kalshi_matched_notional_usd",
+        "higher_matched_notional", "match_confidence",
     ]
     with Path(path).open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -157,8 +159,8 @@ def export_liquidity_comparison_csv(connection: sqlite3.Connection, path: str | 
                 "polymarket_start_time": comparison.polymarket.start_time.isoformat(),
                 "kalshi_start_time": comparison.kalshi.start_time.isoformat(),
                 "polymarket_matched_volume_usd": comparison.polymarket_volume,
-                "kalshi_matched_volume_contracts": comparison.kalshi_volume,
-                "higher_reported_matched_volume": comparison.volume_leader,
+                "kalshi_matched_notional_usd": comparison.kalshi_volume,
+                "higher_matched_notional": comparison.volume_leader,
                 "match_confidence": f"{comparison.confidence:.3f}",
             })
     return len(comparisons)

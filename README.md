@@ -51,11 +51,13 @@ The default `all` provider collects from both venues. Select one explicitly
 with `--provider polymarket` or `--provider kalshi`; use `--max-events N` to
 cap a collection run while testing. Polymarket pages active tennis events and
 reads one match-winner outcome book, which supplies the normalized two-sided
-liquidity without a redundant fetch of its complementary outcome. Kalshi
-discovers open tennis match series and reads the public YES/NO order book for
-each event's canonical player-winner market. The Kalshi public market-data
-endpoints used here do not require API credentials. Neither adapter places
-orders. Each snapshot preserves
+liquidity without a redundant fetch of its complementary outcome. Kalshi discovers open tennis match series and reads the public YES/NO order book for each event's canonical player-winner
+market. Kalshi matched notional
+is calculated from every public trade page for both player-winner markets,
+summing executed contract count multiplied by the trade price for the traded
+outcome. This produces an actual USD notional rather than estimating from the
+latest price. The Kalshi public market-data endpoints used here do not require
+API credentials. Neither adapter places orders. Each snapshot preserves
 provider/event/market IDs, competitors, start and observation timestamps,
 automated competition grade, pre-match/in-play phase, visible liquidity,
 matched volume, currency, and raw provenance. SQLite is the local-first
@@ -95,10 +97,13 @@ is capped at four, and transient rate limits are retried.
 exports only one-to-one, unambiguous cross-venue matches. Matching uses both
 competitors (order-independent) and a 36-hour start-time window; similar names
 or ambiguous duplicate fixtures are left out rather than guessed. The UI and
-CSV compare provider-reported matched volume. Polymarket reports
-market volume in USD, while Kalshi reports volume in contracts; these native
-units are not directly comparable, so relative leaders and win percentages are
-indicative only. Expandable UI rows separately show current order-book depth:
+CSV compare matched notional in USD on both venues. Polymarket supplies
+provider-reported market volume in USD; Kalshi notional is derived from the
+complete paginated public trade history for the two player-winner markets.
+Older locally stored Kalshi snapshots remain in SQLite but are excluded from
+comparisons until the next scrape, because their stored contract counts cannot
+be safely converted into historical dollar notional.
+Expandable UI rows separately show current order-book depth:
 Polymarket bids plus asks from outcome books and Kalshi YES/NO bid levels
 (price multiplied by contract quantity). This is resting depth, not traded
 volume, executable profit, or a guarantee that liquidity is available at one
@@ -109,19 +114,18 @@ The `ui` command starts a small dependency-free local dashboard at
 to run both providers and refresh the comparison table. The dashboard shows
 the last update time, match count, and a colored leader indicator. Switch
 between **Matched Amount** and **Order Book Depth** without losing the current
-filters or sort. Matched amount uses provider-reported volume (USD on
-Polymarket and contracts on Kalshi), so cross-platform comparisons are
-indicative rather than currency-normalized. Order-book depth uses displayed
-USD notional on both venues. Filter by tournament type and match status
-(pre-match, in-play, or both); both summary tables and the results update
-together. The tournament summary shows leader percentages by type and an
-aggregate total. The liquidity-range summary groups matches by combined
+filters or sort. Matched amount compares USD notional on both venues. Order-book
+depth uses displayed USD notional on both venues. Filter by tournament type
+and match status (pre-match, in-play, or both); both summary tables and the
+results update together. The tournament summary shows leader percentages by
+type and an aggregate total. The liquidity-range summary groups matches by combined
 amount in the active view (<5k, 5k-25k, 25k-100k, and 100k+) and shows counts
 and leader percentages. Expanded market rows also switch between matched
 market amounts and order-book depth; Polymarket matched volume is the market
 total shared across its outcome tokens. Older snapshots without per-market
 detail show their stored aggregate depth as a fallback.
-The view switch sits beside **Refresh data**; tournament and status controls
+The view switch includes a short description of each data mode and sits beside
+**Refresh data**; tournament and status controls
 are grouped with a reset action, followed by the two summary cards. Match rows
 show tournament/status badges and can be expanded to compare venue-specific
 market details. Refreshing uses skeleton rows and a completion indicator.
@@ -129,6 +133,23 @@ Doubles teams are matched as pairs, including abbreviated
 Polymarket names, and Kalshi ATP Challenger series are included even when the
 series title omits the word "match". Use `--host` or `--port` if needed.
 Stop it with `Ctrl+C`.
+
+### Public dashboard hosting
+
+The repository includes a GitHub Actions workflow that scrapes both public
+providers, builds a static dashboard, and deploys it to GitHub Pages every ten
+minutes. Visitors can use the dashboard without running Python or a server;
+the page automatically checks for newly published data every five minutes,
+and **Refresh latest data** reloads the latest published snapshot. The
+workflow can also be started manually from the repository's Actions tab.
+GitHub Pages is enabled by the workflow when repository policy permits; if
+Pages is restricted, an administrator must allow Pages deployments from
+GitHub Actions. After the first successful deployment, the public URL appears
+in the workflow's `github-pages` deployment environment.
+
+The hosted site displays the most recent successful scrape. A failed scrape
+does not publish an empty replacement site. Public access to market data is
+subject to Polymarket and Kalshi availability and rate limits.
 
 If Python reports a local certificate verification error on Windows, update the
 certificate bundle used by the adapter:

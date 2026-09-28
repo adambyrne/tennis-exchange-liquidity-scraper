@@ -38,6 +38,11 @@ button:disabled{opacity:.6;cursor:wait}.meta{display:flex;gap:18px;flex-wrap:wra
 .view-toggle{display:flex;align-items:center;gap:3px;padding:5px;border:1px solid #d6e0f0;border-radius:13px;background:#e9eff8;width:max-content;max-width:100%;box-shadow:inset 0 1px 2px #15294a0a}
 .view-toggle button{padding:11px 16px;background:transparent;color:#53617a;border-radius:9px;white-space:nowrap}
 .view-toggle button[aria-pressed="true"]{background:#fff;color:#1749a5;box-shadow:0 3px 9px #1720331c}
+.display-control{display:flex;flex-direction:column;align-items:flex-start;gap:7px}
+.mode-description{display:flex;align-items:flex-start;gap:7px;max-width:390px;padding:8px 11px;border:1px solid #e1e7f0;border-radius:9px;background:#f7f9fc;color:#6b768a;font-size:.75rem;line-height:1.45;text-align:left}
+.mode-description-icon{flex:none;color:#7486a4;font-weight:800}
+.mode-description.fade-in{animation:description-in .22s ease-out}
+@keyframes description-in{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
 button#run{padding:13px 19px;box-shadow:0 5px 12px #2563eb2b}
 .grade-chip{display:inline-flex;align-items:center;padding:5px 9px;border-radius:99px;background:#edf2ff;color:#344f9a;font-size:.72rem;font-weight:700}
 .share-cell{display:flex;align-items:center;justify-content:flex-end;gap:8px}.mini-bar{display:inline-block;width:54px;height:7px;background:#e8edf5;border-radius:99px;overflow:hidden}
@@ -83,13 +88,13 @@ tbody#rows>tr:not(.details-row):hover .expand-button{background:#dbe7ff}
 @keyframes shimmer{100%{transform:translateX(100%)}}@keyframes progress{0%{transform:translateX(-110%)}100%{transform:translateX(310%)}}
 @media(max-width:980px){header{align-items:flex-start;flex-direction:column}.top-actions{width:100%;justify-content:flex-start}}
 @media(max-width:720px){.market-panels,.summary-grid{grid-template-columns:1fr}.distribution{width:100%}.filters{align-items:stretch}.filter{flex:1 1 180px}select{width:100%}}
-@media(max-width:650px){.shell{padding:24px 13px}.top-actions{align-items:stretch;flex-direction:column}.view-toggle{width:100%}.view-toggle button{flex:1;padding:10px 8px}button#run{width:100%}.detail-cell{padding:15px!important}}
+@media(max-width:650px){.shell{padding:24px 13px}.top-actions{align-items:stretch;flex-direction:column}.display-control,.view-toggle,.mode-description{width:100%}.view-toggle button{flex:1;padding:10px 8px}button#run{width:100%}.detail-cell{padding:15px!important}}
 </style></head>
 <body><main class="shell"><header><div><h1>Tennis market volume</h1><p>Compare matched amounts or current order-book depth across Polymarket and Kalshi.</p></div>
-<div class="top-actions"><div class="view-toggle" role="group" aria-label="Data display">
+<div class="top-actions"><div class="display-control"><div class="view-toggle" role="group" aria-label="Data display">
 <button type="button" data-view="matched" aria-pressed="true">Matched Amount</button>
 <button type="button" data-view="depth" aria-pressed="false">Order Book Depth</button>
-</div><button id="run" onclick="runScraper()">Refresh data</button></div></header>
+</div><div class="mode-description" id="mode-description" aria-live="polite"><span class="mode-description-icon" aria-hidden="true">ⓘ</span><span id="mode-description-text"></span></div></div><button id="run" onclick="runScraper()">Refresh data</button></div></header>
 <div id="notice" class="notice" role="status" aria-live="polite"></div><div id="scrape-progress" class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden aria-label="Scrape progress"><i></i></div>
 <div class="meta"><span>Last updated: <strong id="updated">-</strong></span><span>Matches: <strong id="count">0</strong></span></div>
 <section class="filters" aria-label="Match filters">
@@ -100,10 +105,10 @@ tbody#rows>tr:not(.details-row):hover .expand-button{background:#dbe7ff}
 <button type="button" class="reset-button" id="reset-filters">Reset filters</button>
 </section>
 <div class="summary-grid">
-<section class="distribution" aria-label="Reported matched-volume distribution by tournament">
+<section class="distribution" aria-label="Matched-notional distribution by tournament">
 <table><thead><tr><th>Tournament Type</th><th class="pm-column">Polymarket %</th><th class="ka-column">Kalshi %</th><th>Total Matches</th></tr></thead>
 <tbody id="distribution"><tr><td colspan="4">No matched data</td></tr></tbody></table>
-<p class="unit-note">Matched volume: USD vs contracts; indicative only.</p>
+<p class="unit-note">Matched notional in USD on both platforms.</p>
 </section>
 <section class="distribution" aria-label="Match distribution by combined liquidity range">
 <table><thead><tr><th>Liquidity Range</th><th>Count</th><th class="pm-column">Polymarket %</th><th class="ka-column">Kalshi %</th></tr></thead>
@@ -113,13 +118,14 @@ tbody#rows>tr:not(.details-row):hover .expand-button{background:#dbe7ff}
 <section class="card"><div class="table-wrap"><table><thead><tr>
 <th><button data-sort="match">Match <span class="sort-indicator"></span></button></th>
 <th><button data-sort="polymarket"><span id="polymarket-heading">Polymarket matched volume (USD)</span> <span class="sort-indicator"></span></button></th>
-<th><button data-sort="kalshi"><span id="kalshi-heading">Kalshi matched volume (contracts)</span> <span class="sort-indicator"></span></button></th>
+<th><button data-sort="kalshi"><span id="kalshi-heading">Kalshi matched notional (USD)</span> <span class="sort-indicator"></span></button></th>
 <th><button data-sort="leader"><span id="leader-heading">Reported-volume leader*</span> <span class="sort-indicator"></span></button></th>
 </tr></thead>
 <tbody id="rows"><tr><td colspan="4" class="empty">No matched data yet. Run the scraper to load results.</td></tr></tbody></table></div></section></main>
 <script>
 const number = value => new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(Number(value)||0);
 const esc = value => String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const STATIC_MODE = false;
 let currentResults=[], sortColumn="polymarket", sortDirection="descending", selectedGrade="all", selectedStatus="both", dataView="matched", expandedMatches=new Set(), progressTimer;
 function show(message, kind){const n=document.getElementById("notice");n.textContent=message;n.className="notice show "+kind}
 const gradeLabel=grade=>({grand_slam:"Grand Slam",atp:"ATP",wta:"WTA",atp_challenger:"ATP Challenger",itf:"ITF",utr:"UTR",unknown:"Unknown"}[grade]||grade.toUpperCase());
@@ -138,7 +144,7 @@ function summaryPercent(wins,total){return total?Math.round(wins/total*100):0}
 function tournamentRowMarkup(label,row,totalRow=false){const pm=summaryPercent(row.pm,row.total),kalshi=summaryPercent(row.kalshi,row.total);return `<tr class="${totalRow?"total-row":""}"><td><span class="grade-chip">${esc(label)}</span></td><td class="pm-column"><div class="share-cell">${pm}%<span class="mini-bar"><i style="width:${pm}%"></i></span></div></td><td class="ka-column"><div class="share-cell">${kalshi}%<span class="mini-bar kalshi"><i style="width:${kalshi}%"></i></span></div></td><td class="num">${row.total}</td></tr>`}
 function rangeRowMarkup(row,totalRow=false){const pm=summaryPercent(row.pm,row.total),kalshi=summaryPercent(row.kalshi,row.total);return `<tr class="${totalRow?"total-row":""}"><td><span class="grade-chip">${esc(row.label)}</span></td><td class="num">${row.total}</td><td class="pm-column"><div class="share-cell">${pm}%<span class="mini-bar"><i style="width:${pm}%"></i></span></div></td><td class="ka-column"><div class="share-cell">${kalshi}%<span class="mini-bar kalshi"><i style="width:${kalshi}%"></i></span></div></td></tr>`}
 function renderRows(){const results=filteredResults(),rows=document.getElementById("rows");document.getElementById("count").textContent=results.length;if(!results.length){const empty=currentResults.length?'<span class="empty-icon" aria-hidden="true">⌕</span><strong>No matches for these filters</strong>Try a different tournament or status, or reset filters.':'<span class="empty-icon" aria-hidden="true">🎾</span><strong>No matched fixtures yet</strong>Refresh data to collect current matches.';rows.innerHTML=`<tr><td colspan="4" class="empty"><div class="empty-state">${empty}${currentResults.length?'<button type="button" class="reset-button" data-reset-empty>Reset filters</button>':''}</div></td></tr>`;return}
- const unit=dataView==="matched"?["USD","contracts"]:["USD","USD"];
+ const unit=["USD","USD"];
  rows.innerHTML=sortedResults().map((r,index)=>{const pm=amountFor(r,"polymarket"),ka=amountFor(r,"kalshi"),leader=leaderFor(r),winner=leader==="Tie"?"Tie":leader+" higher";const cls=leader==="Polymarket"?"pm":leader==="Kalshi"?"ka":"tie",expanded=expandedMatches.has(r.id),statusClass=r.phase==="in_play"?"status-live":r.phase==="pre_match"?"status-pre":"status-unknown",statusLabel=r.phase==="in_play"?"In-Play":r.phase==="pre_match"?"Pre-Match":"Unknown";
  const summary=`<tr class="match-row ${index%2?"row-alt":""}"><td><button class="expand-button" data-expand="${esc(r.id)}" aria-expanded="${expanded}" aria-label="${expanded?"Collapse":"Expand"} market details"><span class="expand-cue" aria-hidden="true">⌄</span>›</button><span class="match">${esc(r.competitors)}</span><div class="match-badges"><span class="grade-chip">${esc(gradeLabel(r.grade))}</span><span class="status-badge ${statusClass}">${statusLabel}</span></div></td><td class="pm ${leader==="Polymarket"?"winner":""}">${number(pm)} ${unit[0]}</td><td class="ka ${leader==="Kalshi"?"winner":""}">${number(ka)} ${unit[1]}</td><td class="${cls}"><span class="badge">${esc(winner)}</span></td></tr>`;
  const details=`<tr class="details-row" data-detail-for="${esc(r.id)}" ${expanded?"":"hidden"}><td colspan="4" class="detail-cell"><div class="market-panels">${marketPanel("Polymarket",r.markets.polymarket,"pm")}${marketPanel("Kalshi",r.markets.kalshi,"ka")}</div></td></tr>`;
@@ -149,7 +155,7 @@ function renderDistribution(){const grouped=new Map();for(const result of filter
  body.innerHTML=[...grouped.entries()].sort((a,b)=>gradeLabel(a[0]).localeCompare(gradeLabel(b[0]))).map(([grade,row])=>tournamentRowMarkup(gradeLabel(grade),row)).join("")+tournamentRowMarkup("Total",total,true)}
 function renderRangeDistribution(){const bands=[{label:"<5k",min:0,max:5000},{label:"5k-25k",min:5000,max:25000},{label:"25k-100k",min:25000,max:100000},{label:"100k+",min:100000,max:Infinity}];const rows=bands.map(band=>({label:band.label,total:0,pm:0,kalshi:0}));for(const result of filteredResults()){const combined=amountFor(result,"polymarket")+amountFor(result,"kalshi"),index=bands.findIndex(band=>combined>=band.min&&combined<band.max);if(index<0)continue;const row=rows[index],leader=leaderFor(result);row.total++;if(leader==="Polymarket")row.pm++;if(leader==="Kalshi")row.kalshi++}
  const body=document.getElementById("range-distribution"),total=rows.reduce((sum,row)=>({label:"Total",total:sum.total+row.total,pm:sum.pm+row.pm,kalshi:sum.kalshi+row.kalshi}),{label:"Total",total:0,pm:0,kalshi:0});body.innerHTML=rows.map(row=>rangeRowMarkup(row)).join("")+rangeRowMarkup(total,true)}
-function updateViewLabels(){const depth=dataView==="depth";document.getElementById("polymarket-heading").textContent=depth?"Polymarket order-book depth (USD)":"Polymarket matched volume (USD)";document.getElementById("kalshi-heading").textContent=depth?"Kalshi order-book depth (USD)":"Kalshi matched volume (contracts)";document.getElementById("leader-heading").textContent=depth?"Order-book depth leader":"Reported-volume leader*";document.getElementById("range-unit-note").textContent=depth?"Ranges use combined USD order-book depth.":"Ranges use combined reported amounts (USD + contracts), indicative only.";document.querySelectorAll("[data-view]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.view===dataView)))}
+function updateViewLabels(){const depth=dataView==="depth";document.getElementById("polymarket-heading").textContent=depth?"Polymarket order-book depth (USD)":"Polymarket matched volume (USD)";document.getElementById("kalshi-heading").textContent=depth?"Kalshi order-book depth (USD)":"Kalshi matched notional (USD)";document.getElementById("leader-heading").textContent=depth?"Order-book depth leader":"Matched-notional leader";document.getElementById("range-unit-note").textContent=depth?"Ranges use combined USD order-book depth.":"Ranges use combined USD matched notional.";const description=document.getElementById("mode-description-text");description.textContent=depth?"Current order-book depth; the total liquidity available in the order book across all price levels on each platform.":"Provider-reported matched volume; the total USD amount or contracts that have been matched on each platform.";const container=document.getElementById("mode-description");container.classList.remove("fade-in");void container.offsetWidth;container.classList.add("fade-in");document.querySelectorAll("[data-view]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.view===dataView)))}
 function renderDisplays(){for(const id of ["rows","distribution","range-distribution"])document.getElementById(id).setAttribute("aria-busy","false");renderRows();renderDistribution();renderRangeDistribution()}
 function renderSkeletons(){for(const id of ["rows","distribution","range-distribution"])document.getElementById(id).setAttribute("aria-busy","true");document.getElementById("rows").innerHTML=Array.from({length:4},()=>'<tr><td><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row short"></div></td><td><div class="skeleton skeleton-row"></div></td><td><div class="skeleton skeleton-row"></div></td><td><div class="skeleton skeleton-row short"></div></td></tr>').join("");for(const id of ["distribution","range-distribution"]){document.getElementById(id).innerHTML=Array.from({length:4},()=>'<tr><td><div class="skeleton skeleton-summary"></div></td><td><div class="skeleton skeleton-summary"></div></td><td><div class="skeleton skeleton-summary"></div></td><td><div class="skeleton skeleton-summary"></div></td></tr>').join("")}}
 function resetFilters(){selectedGrade="all";selectedStatus="both";document.getElementById("tournament-filter").value="all";document.getElementById("status-filter").value="both";renderDisplays()}
@@ -162,10 +168,10 @@ document.getElementById("status-filter").addEventListener("change",event=>{selec
 document.querySelectorAll("[data-view]").forEach(button=>button.addEventListener("click",()=>{dataView=button.dataset.view;updateViewLabels();renderDisplays()}));
 document.getElementById("reset-filters").addEventListener("click",resetFilters);
 document.getElementById("rows").addEventListener("click",event=>{if(event.target.closest("[data-reset-empty]"))resetFilters()});
-async function load(){const response=await fetch("/api/results");if(response.ok)render(await response.json())}
-async function runScraper(){const button=document.getElementById("run");clearTimeout(progressTimer);button.disabled=true;button.textContent="Refreshing…";show("Collecting current markets from Polymarket and Kalshi…","success");setScrapeProgress(true);renderSkeletons();
+async function load(){const response=await fetch(STATIC_MODE?"./data.json?ts="+Date.now():"/api/results",{cache:"no-store"});if(!response.ok)throw new Error("Unable to load the latest published dashboard data.");render(await response.json())}
+async function runScraper(){const button=document.getElementById("run");if(STATIC_MODE){button.disabled=true;button.textContent="Refreshing…";try{await load();show("Showing the latest scheduled scrape. Data is refreshed about every 10 minutes.","success")}catch(error){show(error.message,"error")}finally{button.disabled=false;button.textContent="Refresh latest data"}return}clearTimeout(progressTimer);button.disabled=true;button.textContent="Refreshing…";show("Collecting current markets from Polymarket and Kalshi…","success");setScrapeProgress(true);renderSkeletons();
  try{const response=await fetch("/api/scrape",{method:"POST"});const data=await response.json();if(!response.ok)throw new Error(data.error||"Scrape failed");render(data);setScrapeProgress(true,true);show(`Scrape complete: ${data.count} snapshots collected.`,"success");progressTimer=setTimeout(()=>setScrapeProgress(false),1400)}catch(error){renderDisplays();setScrapeProgress(false);show(error.message,"error")}finally{button.disabled=false;button.textContent="Refresh data"}}
-load();
+updateViewLabels();document.getElementById("run").textContent=STATIC_MODE?"Refresh latest data":"Refresh data";load().catch(error=>show(error.message,"error"));if(STATIC_MODE)setInterval(()=>load().catch(error=>show(error.message,"error")),300000);
 </script></body></html>"""
 
 
@@ -182,7 +188,7 @@ def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
                     "liquidity": str(item.get("liquidity") or "0"),
                     "matched_volume": str(item.get("matched_volume") or "0"),
                     "currency": str(item.get("currency") or snapshot.currency),
-                    "volume_currency": "contracts" if snapshot.provider == "kalshi" else "USD",
+                    "volume_currency": "USD",
                 }
                 for item in details if isinstance(item, dict)
             ]
@@ -192,7 +198,7 @@ def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
             "liquidity": str(displayed_orderbook_depth(snapshot)),
             "currency": snapshot.currency,
             "matched_volume": str(snapshot.matched_volume),
-            "volume_currency": "contracts" if snapshot.provider == "kalshi" else "USD",
+            "volume_currency": "USD",
         }]
 
     phases = {comparison.polymarket.phase.value, comparison.kalshi.phase.value}

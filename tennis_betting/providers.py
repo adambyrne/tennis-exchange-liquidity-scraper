@@ -338,6 +338,46 @@ class KalshiPublicLiquidityProvider:
                 total += Decimal(str(level[0])) * Decimal(str(level[1]))
         return total
 
+    def _market_traded_notional(self, ticker: str) -> Decimal:
+        total = Decimal("0")
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        while True:
+            params: dict[str, object] = {"ticker": ticker, "limit": 1000}
+            if cursor:
+                params["cursor"] = cursor
+            response = self._get_json("markets/trades", params)
+            if not isinstance(response, dict) or not isinstance(response.get("trades"), list):
+                raise ProviderError(f"Kalshi returned invalid trades for market {ticker}")
+            for trade in response["trades"]:
+                if not isinstance(trade, dict):
+                    continue
+                outcome = str(trade.get("taker_outcome_side") or "").casefold()
+                if outcome not in {"yes", "no"}:
+                    raise ProviderError(f"Kalshi returned an invalid trade for market {ticker}")
+                price_field = "yes_price_dollars" if outcome == "yes" else "no_price_dollars"
+                try:
+                    count = Decimal(str(trade["count_fp"]))
+                    price = Decimal(str(trade[price_field]))
+                except (KeyError, ArithmeticError, TypeError, ValueError) as error:
+                    raise ProviderError(
+                        f"Kalshi returned an invalid trade for market {ticker}"
+                    ) from error
+                if (
+                    not count.is_finite() or not price.is_finite()
+                    or count < 0 or price < 0 or price > 1
+                ):
+                    raise ProviderError(f"Kalshi returned an invalid trade for market {ticker}")
+                total += count * price
+            next_cursor = str(response.get("cursor") or "")
+            if not next_cursor or not response["trades"]:
+                break
+            if next_cursor in seen_cursors:
+                raise ProviderError(f"Kalshi repeated a trade cursor for market {ticker}")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+        return total
+
     def _events_for_series(self, series: tuple[str, str]) -> list[tuple[dict, str, str]]:
         series_ticker, series_title = series
         results: list[tuple[dict, str, str]] = []
@@ -410,13 +450,14 @@ class KalshiPublicLiquidityProvider:
         )
         yes_liquidity = self._side_notional(orderbook.get("yes_dollars"))
         no_liquidity = self._side_notional(orderbook.get("no_dollars"))
-        matched_volume = sum(
-            (
-                Decimal(str(winner_market.get("volume_fp") or winner_market.get("volume", 0)))
-                for winner_market in winner_markets
-            ),
-            Decimal("0"),
-        )
+        market_volumes = {
+            str(winner_market.get("ticker") or ""): self._market_traded_notional(
+                str(winner_market.get("ticker") or "")
+            )
+            for winner_market in winner_markets
+            if winner_market.get("ticker")
+        }
+        matched_volume = sum(market_volumes.values(), Decimal("0"))
         ui_markets = [
             {
                 "name": str(winner_market.get("title") or "Match Winner"),
@@ -425,9 +466,9 @@ class KalshiPublicLiquidityProvider:
                     self._side_notional(book.get("yes_dollars"))
                     + self._side_notional(book.get("no_dollars"))
                 ),
-                "matched_volume": str(
-                    winner_market.get("volume_fp") or winner_market.get("volume") or 0
-                ),
+                "matched_volume": str(market_volumes.get(
+                    str(winner_market.get("ticker") or ""), Decimal("0")
+                )),
                 "currency": "USD",
                 "source_id": str(winner_market.get("ticker") or ""),
             }
@@ -453,6 +494,7 @@ class KalshiPublicLiquidityProvider:
                 "market": market,
                 "orderbook": orderbook,
                 "ui_markets": ui_markets,
+                "matched_volume_basis": "trade_notional_usd",
             },
         }, self.name, observed)
 
