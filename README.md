@@ -137,15 +137,21 @@ Stop it with `Ctrl+C`.
 ### Public dashboard hosting
 
 The repository includes a GitHub Actions workflow that scrapes both public
-providers, builds a static dashboard, and deploys it to GitHub Pages every ten
-minutes. Visitors can use the dashboard without running Python or a server;
-the page automatically checks for newly published data every five minutes,
-and **Refresh latest data** reloads the latest published snapshot. The
-workflow can also be started manually from the repository's Actions tab.
-GitHub Pages is enabled by the workflow when repository policy permits; if
-Pages is restricted, an administrator must allow Pages deployments from
-GitHub Actions. After the first successful deployment, the public URL appears
-in the workflow's `github-pages` deployment environment.
+providers, builds a static dashboard, and deploys it to GitHub Pages when
+manually started from the dashboard or repository's Actions tab. The hosted
+page is public and requires no local Python process. **Run manual refresh**
+opens the workflow in GitHub; a signed-in user with repository write access
+must select **Run workflow**. This permission requirement is imposed by GitHub
+Actions; a public static page cannot securely start a privileged workflow for
+anonymous visitors. After the run succeeds, return to the dashboard and select
+**Reload published data** to display the new scrape. No periodic scrape or
+automatic browser polling is configured, so the page retains the last
+successfully published data until a user with permission triggers another run.
+Pushes that change the workflow or scraper code also run the publishing
+workflow. GitHub Pages is enabled by the workflow when repository policy
+permits; if Pages is restricted, an administrator must allow Pages
+deployments from GitHub Actions. The public URL appears in the workflow's
+`github-pages` deployment environment.
 
 The hosted site displays the most recent successful scrape. A failed scrape
 does not publish an empty replacement site. Public access to market data is

@@ -26,6 +26,8 @@ header{display:flex;align-items:center;justify-content:space-between;gap:22px;ma
 h1{font-size:clamp(2rem,4vw,2.75rem);letter-spacing:-.035em;margin:0 0 8px}p{color:#657089;margin:0}
 button{border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;padding:12px 18px;cursor:pointer}
 button:disabled{opacity:.6;cursor:wait}.meta{display:flex;gap:18px;flex-wrap:wrap;margin:20px 0 18px;color:#63708a;font-size:.92rem}
+#reload-published{background:#e9eff8;color:#35517e;border:1px solid #d6e0f0}
+#reload-published:hover{background:#dce7f6}
 .card{background:#fff;border:1px solid #e3e8f1;border-radius:16px;box-shadow:0 8px 25px #14213d0c;overflow:hidden}
 .actions{display:flex;align-items:center;gap:14px}.summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;max-width:100%;margin:24px 0}
 .distribution{background:linear-gradient(145deg,#fff 30%,#f5f8ff);border:1px solid #dfe7f3;border-radius:16px;padding:18px;max-width:100%;overflow-x:auto;box-shadow:0 6px 20px #1837600d}
@@ -94,7 +96,7 @@ tbody#rows>tr:not(.details-row):hover .expand-button{background:#dbe7ff}
 <div class="top-actions"><div class="display-control"><div class="view-toggle" role="group" aria-label="Data display">
 <button type="button" data-view="matched" aria-pressed="true">Matched Amount</button>
 <button type="button" data-view="depth" aria-pressed="false">Order Book Depth</button>
-</div><div class="mode-description" id="mode-description" aria-live="polite"><span class="mode-description-icon" aria-hidden="true">ⓘ</span><span id="mode-description-text"></span></div></div><button id="run" onclick="runScraper()">Refresh data</button></div></header>
+</div><div class="mode-description" id="mode-description" aria-live="polite"><span class="mode-description-icon" aria-hidden="true">ⓘ</span><span id="mode-description-text"></span></div></div><button id="run" onclick="runScraper()">Refresh data</button><button id="reload-published" type="button" onclick="reloadPublished()" hidden>Reload published data</button></div></header>
 <div id="notice" class="notice" role="status" aria-live="polite"></div><div id="scrape-progress" class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden aria-label="Scrape progress"><i></i></div>
 <div class="meta"><span>Last updated: <strong id="updated">-</strong></span><span>Matches: <strong id="count">0</strong></span></div>
 <section class="filters" aria-label="Match filters">
@@ -169,9 +171,10 @@ document.querySelectorAll("[data-view]").forEach(button=>button.addEventListener
 document.getElementById("reset-filters").addEventListener("click",resetFilters);
 document.getElementById("rows").addEventListener("click",event=>{if(event.target.closest("[data-reset-empty]"))resetFilters()});
 async function load(){const response=await fetch(STATIC_MODE?"./data.json?ts="+Date.now():"/api/results",{cache:"no-store"});if(!response.ok)throw new Error("Unable to load the latest published dashboard data.");render(await response.json())}
-async function runScraper(){const button=document.getElementById("run");if(STATIC_MODE){button.disabled=true;button.textContent="Refreshing…";try{await load();show("Showing the latest scheduled scrape. Data is refreshed about every 10 minutes.","success")}catch(error){show(error.message,"error")}finally{button.disabled=false;button.textContent="Refresh latest data"}return}clearTimeout(progressTimer);button.disabled=true;button.textContent="Refreshing…";show("Collecting current markets from Polymarket and Kalshi…","success");setScrapeProgress(true);renderSkeletons();
+async function reloadPublished(){const button=document.getElementById("reload-published");button.disabled=true;try{await load();show("Loaded the latest successfully published data.","success")}catch(error){show(error.message,"error")}finally{button.disabled=false}}
+async function runScraper(){const button=document.getElementById("run");if(STATIC_MODE){window.open("https://github.com/adambyrne/tennis-exchange-liquidity-scraper/actions/workflows/publish-dashboard.yml","_blank","noopener");show("GitHub Actions opened. Sign in with repository write access and select Run workflow to start a scrape. After it succeeds, reload the published data here.","success");return}clearTimeout(progressTimer);button.disabled=true;button.textContent="Refreshing…";show("Collecting current markets from Polymarket and Kalshi…","success");setScrapeProgress(true);renderSkeletons();
  try{const response=await fetch("/api/scrape",{method:"POST"});const data=await response.json();if(!response.ok)throw new Error(data.error||"Scrape failed");render(data);setScrapeProgress(true,true);show(`Scrape complete: ${data.count} snapshots collected.`,"success");progressTimer=setTimeout(()=>setScrapeProgress(false),1400)}catch(error){renderDisplays();setScrapeProgress(false);show(error.message,"error")}finally{button.disabled=false;button.textContent="Refresh data"}}
-updateViewLabels();document.getElementById("run").textContent=STATIC_MODE?"Refresh latest data":"Refresh data";load().catch(error=>show(error.message,"error"));if(STATIC_MODE)setInterval(()=>load().catch(error=>show(error.message,"error")),300000);
+updateViewLabels();document.getElementById("run").textContent=STATIC_MODE?"Run manual refresh":"Refresh data";document.getElementById("reload-published").hidden=!STATIC_MODE;load().catch(error=>show(error.message,"error"));
 </script></body></html>"""
 
 

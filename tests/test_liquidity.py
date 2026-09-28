@@ -714,6 +714,11 @@ class LiquidityTests(unittest.TestCase):
         )
         self.assertIn("const STATIC_MODE = false;", HTML)
         self.assertIn('fetch(STATIC_MODE?"./data.json?ts="+Date.now():"/api/results"', HTML)
+        self.assertIn('id="reload-published"', HTML)
+        self.assertIn("https://github.com/adambyrne/tennis-exchange-liquidity-scraper/actions/workflows/publish-dashboard.yml", HTML)
+        self.assertIn('window.open("https://github.com/adambyrne/tennis-exchange-liquidity-scraper/actions/workflows/publish-dashboard.yml"', HTML)
+        self.assertIn("function reloadPublished()", HTML)
+        self.assertNotIn('setInterval(()=>load()', HTML)
 
     def test_static_site_builds_dashboard_and_data_payload(self):
         import json
@@ -726,6 +731,10 @@ class LiquidityTests(unittest.TestCase):
             output = Path(directory)
             self.assertIn(
                 "const STATIC_MODE = true;",
+                (output / "index.html").read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                "Run manual refresh",
                 (output / "index.html").read_text(encoding="utf-8"),
             )
             self.assertEqual(
