@@ -187,6 +187,7 @@ class PolymarketPublicLiquidityProvider:
                 "name": str(market.get("question") or event_name),
                 "selection": selection,
                 "liquidity": str(depth),
+                "matched_volume": str(market.get("volume") or 0),
                 "currency": "USDC",
                 "source_id": str(token_id),
             })
@@ -423,6 +424,9 @@ class KalshiPublicLiquidityProvider:
                 "liquidity": str(
                     self._side_notional(book.get("yes_dollars"))
                     + self._side_notional(book.get("no_dollars"))
+                ),
+                "matched_volume": str(
+                    winner_market.get("volume_fp") or winner_market.get("volume") or 0
                 ),
                 "currency": "USD",
                 "source_id": str(winner_market.get("ticker") or ""),

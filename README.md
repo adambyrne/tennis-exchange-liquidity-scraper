@@ -107,17 +107,21 @@ price.
 The `ui` command starts a small dependency-free local dashboard at
 `http://127.0.0.1:8000`. Open that address in a browser and use **Refresh data**
 to run both providers and refresh the comparison table. The dashboard shows
-the last update time, match count, provider-reported matched volume, and a
-colored leader indicator. Since the venues report different units (USD versus
-contracts), volume comparisons are indicative rather than currency-normalized.
-Results default to highest Polymarket-reported volume; sortable columns can be
-changed by clicking their headers. Filter by tournament type and match status
-(pre-match, in-play, or both); the summary table and results update together.
-The summary breaks out reported-volume leaders by tournament type and includes
-an aggregate total row with visual progress bars. Expand a match row to compare
-current Polymarket outcome-book and Kalshi player-winner order-book depth.
-Older snapshots without per-market detail show their stored aggregate depth as
-a fallback. Doubles teams are matched as pairs, including abbreviated
+the last update time, match count, and a colored leader indicator. Switch
+between **Matched Amount** and **Order Book Depth** without losing the current
+filters or sort. Matched amount uses provider-reported volume (USD on
+Polymarket and contracts on Kalshi), so cross-platform comparisons are
+indicative rather than currency-normalized. Order-book depth uses displayed
+USD notional on both venues. Filter by tournament type and match status
+(pre-match, in-play, or both); both summary tables and the results update
+together. The tournament summary shows leader percentages by type and an
+aggregate total. The liquidity-range summary groups matches by combined
+amount in the active view (<5k, 5k-25k, 25k-100k, and 100k+) and shows counts
+and leader percentages. Expanded market rows also switch between matched
+market amounts and order-book depth; Polymarket matched volume is the market
+total shared across its outcome tokens. Older snapshots
+without per-market detail show their stored aggregate depth as a fallback.
+Doubles teams are matched as pairs, including abbreviated
 Polymarket names, and Kalshi ATP Challenger series are included even when the
 series title omits the word "match". Use `--host` or `--port` if needed.
 Stop it with `Ctrl+C`.

@@ -229,6 +229,10 @@ class LiquidityTests(unittest.TestCase):
             [market["liquidity"] for market in snapshots[0].raw["ui_markets"]],
             ["9.80", "9.80"],
         )
+        self.assertEqual(
+            [market["matched_volume"] for market in snapshots[0].raw["ui_markets"]],
+            ["123.45", "123.45"],
+        )
         self.assertEqual(snapshots[0].grade, CompetitionGrade.ATP)
         self.assertEqual(snapshots[0].market_name, "Match Winner")
 
@@ -351,6 +355,10 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(
             [market["selection"] for market in snapshot.raw["ui_markets"]],
             ["Player One wins", "Player Two wins"],
+        )
+        self.assertEqual(
+            [market["matched_volume"] for market in snapshot.raw["ui_markets"]],
+            ["85", "70"],
         )
 
     def test_kalshi_discovers_challenger_series_and_collects_doubles_teams(self):
@@ -553,6 +561,8 @@ class LiquidityTests(unittest.TestCase):
             self.assertEqual(comparison["id"], "pm-event|k-event")
             self.assertEqual(comparison["polymarket_volume"], "130")
             self.assertEqual(comparison["kalshi_volume"], "42")
+            self.assertEqual(comparison["polymarket_depth"], "9.80")
+            self.assertEqual(comparison["kalshi_depth"], "7.00")
             self.assertEqual(comparison["phase"], "in_play")
             self.assertEqual(comparison["markets"]["polymarket"][0]["liquidity"], "9.80")
             self.assertEqual(comparison["markets"]["kalshi"][0]["liquidity"], "7.00")
@@ -584,7 +594,24 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn("marketPanel(\"Polymarket\"", HTML)
         self.assertIn("marketPanel(\"Kalshi\"", HTML)
         self.assertIn("mini-bar", HTML)
-        self.assertIn('rowMarkup("Total",total,true)', HTML)
+        self.assertIn('tournamentRowMarkup("Total",total,true)', HTML)
+        self.assertIn('data-view="matched"', HTML)
+        self.assertIn('data-view="depth"', HTML)
+        self.assertIn('dataView="matched"', HTML)
+        self.assertIn("function amountFor(result,venue)", HTML)
+        self.assertIn('dataView==="depth"', HTML)
+        self.assertIn('number(depth?m.liquidity:m.matched_volume)', HTML)
+        self.assertIn("new Map(markets.map(m=>[`${m.name}|${m.matched_volume}`", HTML)
+        self.assertIn('document.getElementById("tournament-filter").addEventListener("change"', HTML)
+        self.assertIn('document.getElementById("status-filter").addEventListener("change"', HTML)
+        self.assertIn('document.querySelectorAll("[data-view]")', HTML)
+        self.assertIn('id="range-distribution"', HTML)
+        self.assertIn('label:"<5k"', HTML)
+        self.assertIn('label:"5k-25k"', HTML)
+        self.assertIn('label:"25k-100k"', HTML)
+        self.assertIn('label:"100k+"', HTML)
+        self.assertIn("renderRangeDistribution()", HTML)
+        self.assertIn("aria-pressed", HTML)
 
     def test_ui_liquidity_distribution_counts_ties_in_denominator(self):
         from tennis_betting.ui import _liquidity_distribution
