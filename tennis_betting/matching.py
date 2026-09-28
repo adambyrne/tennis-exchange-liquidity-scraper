@@ -67,16 +67,28 @@ def _name_similarity(left: str, right: str) -> float:
     if first == second:
         return 1.0
     shorter, longer = sorted((first, second), key=len)
-    if len(shorter) >= 5 and longer.endswith(shorter):
+    if len(shorter) >= 4 and longer.endswith(shorter):
         return 0.96
     return SequenceMatcher(None, first, second).ratio()
+
+
+def _team_similarity(left: str, right: str) -> float:
+    left_players = [name.strip() for name in re.split(r"\s*/\s*", left) if name.strip()]
+    right_players = [name.strip() for name in re.split(r"\s*/\s*", right) if name.strip()]
+    if len(left_players) != len(right_players):
+        return 0.0
+    return max(
+        sum(_name_similarity(first, second) for first, second in zip(left_players, order))
+        / len(left_players)
+        for order in permutations(right_players)
+    )
 
 
 def _competitor_similarity(left: tuple[str, ...], right: tuple[str, ...]) -> float:
     if len(left) != 2 or len(right) != 2:
         return 0.0
     return max(
-        sum(_name_similarity(first, second) for first, second in zip(left, order)) / 2
+        sum(_team_similarity(first, second) for first, second in zip(left, order)) / 2
         for order in permutations(right)
     )
 

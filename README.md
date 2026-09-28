@@ -107,8 +107,12 @@ The `ui` command starts a small dependency-free local dashboard at
 to run both providers and refresh the comparison table. The dashboard shows
 the last update time, match count, USD liquidity on each venue, and a colored
 leader indicator. Results default to highest combined liquidity and all table
-columns are sortable by clicking their headers. A summary card shows the share
-of matched fixtures led by each venue. Use `--host` or `--port` if needed.
+columns are sortable by clicking their headers. Filter the results by
+tournament type; the tournament summary table updates to show each type's
+Polymarket/Kalshi liquidity-win percentages and matched count, respecting the
+active filter. Doubles teams are matched as pairs, including abbreviated
+Polymarket names, and Kalshi ATP Challenger series are included even when the
+series title omits the word "match". Use `--host` or `--port` if needed.
 Stop it with `Ctrl+C`.
 
 If Python reports a local certificate verification error on Windows, update the

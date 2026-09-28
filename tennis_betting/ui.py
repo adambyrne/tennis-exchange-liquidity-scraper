@@ -26,8 +26,11 @@ h1{font-size:clamp(1.5rem,3vw,2.25rem);margin:0 0 6px}p{color:#657089;margin:0}
 button{border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;padding:12px 18px;cursor:pointer}
 button:disabled{opacity:.6;cursor:wait}.meta{display:flex;gap:16px;flex-wrap:wrap;margin:18px 0}
 .card{background:#fff;border:1px solid #e3e8f1;border-radius:14px;box-shadow:0 5px 18px #14213d0b;overflow:hidden}
-.actions{display:flex;align-items:center;gap:12px}.distribution{display:flex;gap:14px;background:#fff;border:1px solid #e3e8f1;border-radius:10px;padding:10px 14px}
-.distribution div{display:grid;gap:2px}.distribution strong{font-size:1rem}.distribution small{font-size:.7rem;color:#657089}
+.actions{display:flex;align-items:center;gap:12px}.distribution{background:#fff;border:1px solid #e3e8f1;border-radius:10px;padding:8px 10px;max-width:100%;overflow-x:auto}
+.distribution table{border-collapse:collapse;min-width:310px;width:auto}.distribution th,.distribution td{padding:5px 8px;border-bottom:1px solid #edf0f5;font-size:.72rem;white-space:nowrap}
+.distribution th{font-size:.65rem}.distribution td.num{text-align:right;font-variant-numeric:tabular-nums}
+.filter{display:flex;align-items:center;gap:8px;margin:18px 0;color:#657089;font-size:.9rem}
+select{border:1px solid #d7deea;border-radius:8px;background:#fff;padding:8px 30px 8px 10px;color:#172033}
 .notice{padding:12px 16px;margin-bottom:16px;border-radius:10px;display:none}.notice.show{display:block}
 .success{background:#e8f7ee;color:#17663a}.error{background:#fff0f0;color:#a32929}
 .table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:720px}
@@ -41,11 +44,13 @@ td{font-variant-numeric:tabular-nums}.match{font-weight:700}.sub{font-size:.8rem
 @media(max-width:650px){.shell{padding:22px 12px}header{align-items:flex-start;flex-direction:column}.actions{width:100%;align-items:stretch;flex-direction:column}.distribution{justify-content:space-around}button#run{width:100%}}
 </style></head>
 <body><main class="shell"><header><div><h1>Tennis liquidity</h1><p>Current displayed order-book depth across Polymarket and Kalshi.</p></div>
-<div class="actions"><section class="distribution" aria-label="Liquidity distribution">
-<div><strong id="pm-share" class="pm">-</strong><small>More liquid on Polymarket</small></div>
-<div><strong id="kalshi-share" class="ka">-</strong><small>More liquid on Kalshi</small></div>
+<div class="actions"><section class="distribution" aria-label="Liquidity distribution by tournament">
+<table><thead><tr><th>Tournament Type</th><th>Polymarket %</th><th>Kalshi %</th><th>Total Matches</th></tr></thead>
+<tbody id="distribution"><tr><td colspan="4">No matched data</td></tr></tbody></table>
 </section><button id="run" onclick="runScraper()">Refresh data</button></div></header>
 <div id="notice" class="notice"></div><div class="meta"><span>Last updated: <strong id="updated">-</strong></span><span>Matches: <strong id="count">0</strong></span></div>
+<label class="filter" for="tournament-filter">Tournament type
+<select id="tournament-filter"><option value="all">All tournaments</option></select></label>
 <section class="card"><div class="table-wrap"><table><thead><tr>
 <th><button data-sort="match">Match <span class="sort-indicator"></span></button></th>
 <th><button data-sort="polymarket">Polymarket <span class="sort-indicator"></span></button></th>
@@ -56,22 +61,27 @@ td{font-variant-numeric:tabular-nums}.match{font-weight:700}.sub{font-size:.8rem
 <script>
 const money = value => new Intl.NumberFormat(undefined,{style:"currency",currency:"USD",maximumFractionDigits:2}).format(Number(value)||0);
 const esc = value => String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-let currentResults=[], sortColumn="total", sortDirection="descending";
+let currentResults=[], sortColumn="total", sortDirection="descending", selectedGrade="all";
 function show(message, kind){const n=document.getElementById("notice");n.textContent=message;n.className="notice show "+kind}
+const gradeLabel=grade=>({grand_slam:"Grand Slam",atp:"ATP",wta:"WTA",atp_challenger:"ATP Challenger",itf:"ITF",utr:"UTR",unknown:"Unknown"}[grade]||grade.toUpperCase());
 function updateSortIndicators(){document.querySelectorAll("th button[data-sort]").forEach(button=>{const active=button.dataset.sort===sortColumn;const defaultTotal=sortColumn==="total"&&button.dataset.sort==="match";button.setAttribute("aria-sort",defaultTotal?"other":active?sortDirection:"none");const indicator=button.querySelector(".sort-indicator");indicator.textContent=defaultTotal?(sortDirection==="ascending"?"Σ↑":"Σ↓"):active?(sortDirection==="ascending"?"↑":"↓"):"";indicator.title=defaultTotal?"Sorted by combined liquidity":"";button.setAttribute("aria-label",defaultTotal?"Match; sorted by combined liquidity descending":button.textContent.trim())})}
-function sortedResults(){const sign=sortDirection==="ascending"?1:-1;return [...currentResults].sort((a,b)=>{let left,right;
+function filteredResults(){return selectedGrade==="all"?currentResults:currentResults.filter(result=>result.grade===selectedGrade)}
+function sortedResults(){const sign=sortDirection==="ascending"?1:-1;return [...filteredResults()].sort((a,b)=>{let left,right;
  if(sortColumn==="total"){left=Number(a.polymarket_liquidity)+Number(a.kalshi_liquidity);right=Number(b.polymarket_liquidity)+Number(b.kalshi_liquidity)}
  else if(sortColumn==="polymarket"){left=Number(a.polymarket_liquidity);right=Number(b.polymarket_liquidity)}
  else if(sortColumn==="kalshi"){left=Number(a.kalshi_liquidity);right=Number(b.kalshi_liquidity)}
  else if(sortColumn==="difference"){left=Number(a.difference);right=Number(b.difference)}
  else {left=a.competitors.toLocaleLowerCase();right=b.competitors.toLocaleLowerCase()}
  const result=typeof left==="string"?left.localeCompare(right):left-right;return result===0?a.competitors.localeCompare(b.competitors):result*sign})}
-function renderRows(){const rows=document.getElementById("rows");if(!currentResults.length){rows.innerHTML='<tr><td colspan="4" class="empty">No conservatively matched fixtures found.</td></tr>';return}
+function renderRows(){const results=filteredResults(),rows=document.getElementById("rows");document.getElementById("count").textContent=results.length;if(!results.length){rows.innerHTML='<tr><td colspan="4" class="empty">No conservatively matched fixtures found for this tournament type.</td></tr>';return}
  rows.innerHTML=sortedResults().map(r=>{const pm=Number(r.polymarket_liquidity),ka=Number(r.kalshi_liquidity),winner=r.more_liquid==="Tie"?"Tie":r.more_liquid+" higher";const cls=r.more_liquid==="Polymarket"?"pm":r.more_liquid==="Kalshi"?"ka":"tie";
  return `<tr><td><div class="match">${esc(r.competitors)}</div><div class="sub">${esc(r.grade)} · ${esc(r.phase)}</div></td><td class="${r.more_liquid==="Polymarket"?"winner":""}">${money(pm)}</td><td class="${r.more_liquid==="Kalshi"?"winner":""}">${money(ka)}</td><td class="${cls}">${money(r.difference)} <span class="badge">${esc(winner)}</span></td></tr>`}).join("")}
-function render(data){currentResults=data.results||[];document.getElementById("updated").textContent=data.updated_at?new Date(data.updated_at).toLocaleString():"-";document.getElementById("count").textContent=currentResults.length;
- document.getElementById("pm-share").textContent=data.distribution?.polymarket_percent??"0%";document.getElementById("kalshi-share").textContent=data.distribution?.kalshi_percent??"0%";updateSortIndicators();renderRows()}
+function renderDistribution(){const grouped=new Map();for(const result of filteredResults()){const grade=result.grade||"unknown";if(!grouped.has(grade))grouped.set(grade,{total:0,pm:0,kalshi:0});const row=grouped.get(grade);row.total++;if(result.more_liquid==="Polymarket")row.pm++;if(result.more_liquid==="Kalshi")row.kalshi++}
+ const body=document.getElementById("distribution");if(!grouped.size){body.innerHTML='<tr><td colspan="4">No matched data</td></tr>';return}
+ body.innerHTML=[...grouped.entries()].sort((a,b)=>gradeLabel(a[0]).localeCompare(gradeLabel(b[0]))).map(([grade,row])=>`<tr><td>${esc(gradeLabel(grade))}</td><td class="num">${Math.round(row.pm/row.total*100)}%</td><td class="num">${Math.round(row.kalshi/row.total*100)}%</td><td class="num">${row.total}</td></tr>`).join("")}
+function render(data){currentResults=data.results||[];document.getElementById("updated").textContent=data.updated_at?new Date(data.updated_at).toLocaleString():"-";const filter=document.getElementById("tournament-filter"),previous=selectedGrade,grades=[...new Set(currentResults.map(result=>result.grade||"unknown"))].sort();filter.innerHTML='<option value="all">All tournaments</option>'+grades.map(grade=>`<option value="${esc(grade)}">${esc(gradeLabel(grade))}</option>`).join("");selectedGrade=grades.includes(previous)?previous:"all";filter.value=selectedGrade;updateSortIndicators();renderRows();renderDistribution()}
 document.querySelectorAll("th button[data-sort]").forEach(button=>button.addEventListener("click",()=>{if(sortColumn===button.dataset.sort)sortDirection=sortDirection==="ascending"?"descending":"ascending";else{sortColumn=button.dataset.sort;sortDirection="ascending"}updateSortIndicators();renderRows()}));updateSortIndicators();
+document.getElementById("tournament-filter").addEventListener("change",event=>{selectedGrade=event.target.value;renderRows();renderDistribution()});
 async function load(){const response=await fetch("/api/results");if(response.ok)render(await response.json())}
 async function runScraper(){const button=document.getElementById("run");button.disabled=true;button.textContent="Refreshing…";show("Collecting current markets from Polymarket and Kalshi…","success");
  try{const response=await fetch("/api/scrape",{method:"POST"});const data=await response.json();if(!response.ok)throw new Error(data.error||"Scrape failed");show(`Scrape complete: ${data.count} snapshots collected.`,"success");render(data)}catch(error){show(error.message,"error")}finally{button.disabled=false;button.textContent="Refresh data"}}
@@ -82,7 +92,11 @@ load();
 def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
     return {
         "competitors": " vs ".join(comparison.polymarket.competitor_names),
-        "grade": comparison.polymarket.grade.value,
+        "grade": (
+            comparison.polymarket.grade
+            if comparison.polymarket.grade.value != "unknown"
+            else comparison.kalshi.grade
+        ).value,
         "phase": comparison.polymarket.phase.value,
         "polymarket_liquidity": str(comparison.polymarket_liquidity),
         "kalshi_liquidity": str(comparison.kalshi_liquidity),
@@ -92,16 +106,28 @@ def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
     }
 
 
-def _liquidity_distribution(comparisons: list[LiquidityComparison]) -> dict[str, str]:
-    total = len(comparisons)
-    if total == 0:
-        return {"polymarket_percent": "0%", "kalshi_percent": "0%"}
-    polymarket_wins = sum(item.more_liquid == "Polymarket" for item in comparisons)
-    kalshi_wins = sum(item.more_liquid == "Kalshi" for item in comparisons)
-    return {
-        "polymarket_percent": f"{polymarket_wins / total:.0%}",
-        "kalshi_percent": f"{kalshi_wins / total:.0%}",
-    }
+def _liquidity_distribution(comparisons: list[LiquidityComparison]) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, int]] = {}
+    for comparison in comparisons:
+        grade = (
+            comparison.polymarket.grade
+            if comparison.polymarket.grade.value != "unknown"
+            else comparison.kalshi.grade
+        ).value
+        row = grouped.setdefault(grade, {"total": 0, "polymarket_wins": 0, "kalshi_wins": 0})
+        row["total"] += 1
+        row["polymarket_wins"] += comparison.more_liquid == "Polymarket"
+        row["kalshi_wins"] += comparison.more_liquid == "Kalshi"
+    result = []
+    for grade, row in sorted(grouped.items()):
+        total = row["total"]
+        result.append({
+            "tournament_type": grade,
+            "polymarket_percent": f"{row['polymarket_wins'] / total:.0%}",
+            "kalshi_percent": f"{row['kalshi_wins'] / total:.0%}",
+            "total_matches": total,
+        })
+    return result
 
 
 class LiquidityUI:
