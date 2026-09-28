@@ -56,8 +56,12 @@ def connect_database(path: str | Path) -> sqlite3.Connection:
     return connection
 
 
-def save_snapshots(connection: sqlite3.Connection, snapshots: list[LiquiditySnapshot]) -> int:
-    connection.executemany(
+def _insert_snapshots(
+    connection: sqlite3.Connection, snapshots: list[LiquiditySnapshot],
+) -> int:
+    if not snapshots:
+        return 0
+    cursor = connection.executemany(
         """INSERT OR IGNORE INTO liquidity_snapshots
         (provider, source_event_id, source_market_id, event_name, market_name, competitor_names,
          start_time, observed_at, grade, phase, available_back, available_unmatched, matched_volume,
@@ -72,8 +76,19 @@ def save_snapshots(connection: sqlite3.Connection, snapshots: list[LiquiditySnap
             json.dumps(item.raw, default=_json),
         ) for item in snapshots],
     )
-    connection.commit()
-    return connection.execute("SELECT changes()").fetchone()[0]
+    return cursor.rowcount
+
+
+def save_snapshots(connection: sqlite3.Connection, snapshots: list[LiquiditySnapshot]) -> int:
+    with connection:
+        return _insert_snapshots(connection, snapshots)
+
+
+def replace_snapshots(connection: sqlite3.Connection, snapshots: list[LiquiditySnapshot]) -> int:
+    """Atomically replace the current collection with one complete new run."""
+    with connection:
+        connection.execute("DELETE FROM liquidity_snapshots")
+        return _insert_snapshots(connection, snapshots)
 
 
 def export_liquidity_csv(connection: sqlite3.Connection, path: str | Path) -> int:

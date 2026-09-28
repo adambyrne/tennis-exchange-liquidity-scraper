@@ -43,6 +43,16 @@ class TestSnapshotProvider:
         return [test_snapshot()]
 
 
+class FixedSnapshotProvider:
+    name = "test-provider"
+
+    def __init__(self, snapshots):
+        self._snapshots = snapshots
+
+    def snapshots(self, observed_at=None):
+        return self._snapshots
+
+
 class LiquidityTests(unittest.TestCase):
     def test_scrape_defaults_to_both_live_providers(self):
         args = build_parser().parse_args(["scrape", "--once"])
@@ -82,6 +92,40 @@ class LiquidityTests(unittest.TestCase):
             self.assertIn("source_market_id", output.read_text(encoding="utf-8"))
             connection.close()
 
+    def test_scrape_replaces_previous_snapshots_with_the_latest_complete_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            connection = connect_database(Path(directory) / "liquidity.sqlite3")
+            old_snapshot = test_snapshot("old-market")
+            new_snapshot = test_snapshot("new-market")
+            save_snapshots(connection, [old_snapshot])
+            collected = collect_once(
+                [FixedSnapshotProvider([new_snapshot, new_snapshot])], connection,
+            )
+            rows = connection.execute(
+                "SELECT source_market_id FROM liquidity_snapshots"
+            ).fetchall()
+            self.assertEqual([row[0] for row in rows], ["new-market"])
+            self.assertEqual(collected, [new_snapshot])
+            connection.close()
+
+    def test_failed_scrape_preserves_last_complete_snapshot_set(self):
+        class FailingProvider:
+            name = "failing-provider"
+
+            def snapshots(self, observed_at=None):
+                raise ProviderError("temporary API failure")
+
+        with tempfile.TemporaryDirectory() as directory:
+            connection = connect_database(Path(directory) / "liquidity.sqlite3")
+            save_snapshots(connection, [test_snapshot("previous-run")])
+            with self.assertRaisesRegex(ProviderError, "temporary API failure"):
+                collect_once([FailingProvider()], connection)
+            rows = connection.execute(
+                "SELECT source_market_id FROM liquidity_snapshots"
+            ).fetchall()
+            self.assertEqual([row[0] for row in rows], ["previous-run"])
+            connection.close()
+
     def test_cli_reports_csv_export_path_and_row_count(self):
         with tempfile.TemporaryDirectory() as directory:
             db = Path(directory) / "liquidity.sqlite3"
@@ -89,11 +133,13 @@ class LiquidityTests(unittest.TestCase):
             save_snapshots(connection, [test_snapshot()])
             connection.close()
             output = Path(directory) / "liquidity.csv"
+            output.write_text("stale data from an earlier export", encoding="utf-8")
             captured = StringIO()
             with redirect_stdout(captured):
                 main(["export-liquidity", "--db", str(db), str(output)])
             self.assertIn(f"Exported 1 snapshots to {output}", captured.getvalue())
             self.assertTrue(output.exists())
+            self.assertNotIn("stale data", output.read_text(encoding="utf-8"))
 
     def test_snapshot_raw_metadata_serializes_decimal_values(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -170,7 +216,7 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(snapshots[0].source_market_id, "market-1")
         self.assertEqual(snapshots[0].available_back, Decimal("5.00"))
         self.assertEqual(snapshots[0].available_unmatched, Decimal("4.80"))
-        self.assertEqual(len(snapshots[0].raw["order_books"]), 2)
+        self.assertEqual(len(snapshots[0].raw["order_books"]), 1)
         self.assertEqual(snapshots[0].grade, CompetitionGrade.ATP)
         self.assertEqual(snapshots[0].market_name, "Match Winner")
 
