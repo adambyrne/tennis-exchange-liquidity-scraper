@@ -106,8 +106,10 @@ The `ui` command starts a small dependency-free local dashboard at
 `http://127.0.0.1:8000`. Open that address in a browser and use **Refresh data**
 to run both providers and refresh the comparison table. The dashboard shows
 the last update time, match count, USD liquidity on each venue, and a colored
-leader indicator. Use `--host` or `--port` if needed. Stop it with
-`Ctrl+C`.
+leader indicator. Results default to highest combined liquidity and all table
+columns are sortable by clicking their headers. A summary card shows the share
+of matched fixtures led by each venue. Use `--host` or `--port` if needed.
+Stop it with `Ctrl+C`.
 
 If Python reports a local certificate verification error on Windows, update the
 certificate bundle used by the adapter:

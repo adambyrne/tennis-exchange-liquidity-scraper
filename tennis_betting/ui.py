@@ -26,32 +26,56 @@ h1{font-size:clamp(1.5rem,3vw,2.25rem);margin:0 0 6px}p{color:#657089;margin:0}
 button{border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;padding:12px 18px;cursor:pointer}
 button:disabled{opacity:.6;cursor:wait}.meta{display:flex;gap:16px;flex-wrap:wrap;margin:18px 0}
 .card{background:#fff;border:1px solid #e3e8f1;border-radius:14px;box-shadow:0 5px 18px #14213d0b;overflow:hidden}
+.actions{display:flex;align-items:center;gap:12px}.distribution{display:flex;gap:14px;background:#fff;border:1px solid #e3e8f1;border-radius:10px;padding:10px 14px}
+.distribution div{display:grid;gap:2px}.distribution strong{font-size:1rem}.distribution small{font-size:.7rem;color:#657089}
 .notice{padding:12px 16px;margin-bottom:16px;border-radius:10px;display:none}.notice.show{display:block}
 .success{background:#e8f7ee;color:#17663a}.error{background:#fff0f0;color:#a32929}
 .table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:720px}
 th,td{text-align:left;padding:14px 16px;border-bottom:1px solid #edf0f5}th{font-size:.78rem;text-transform:uppercase;color:#657089}
+th button{padding:0;background:none;color:inherit;font:inherit;text-transform:inherit;border-radius:0}
+th button:hover,th button[aria-sort="ascending"],th button[aria-sort="descending"]{color:#172033}
+.sort-indicator{display:inline-block;width:1em;margin-left:4px;color:#2563eb}
 td{font-variant-numeric:tabular-nums}.match{font-weight:700}.sub{font-size:.8rem;color:#7b879d;margin-top:4px}
 .winner{font-weight:700}.pm{color:#2563eb}.ka{color:#b45309}.tie{color:#657089}.empty{text-align:center;color:#657089;padding:40px}
 .badge{display:inline-block;border-radius:99px;padding:4px 9px;font-size:.78rem;background:#eef2ff}
-@media(max-width:650px){.shell{padding:22px 12px}header{align-items:flex-start;flex-direction:column}button{width:100%}}
+@media(max-width:650px){.shell{padding:22px 12px}header{align-items:flex-start;flex-direction:column}.actions{width:100%;align-items:stretch;flex-direction:column}.distribution{justify-content:space-around}button#run{width:100%}}
 </style></head>
 <body><main class="shell"><header><div><h1>Tennis liquidity</h1><p>Current displayed order-book depth across Polymarket and Kalshi.</p></div>
-<button id="run" onclick="runScraper()">Refresh data</button></header>
+<div class="actions"><section class="distribution" aria-label="Liquidity distribution">
+<div><strong id="pm-share" class="pm">-</strong><small>More liquid on Polymarket</small></div>
+<div><strong id="kalshi-share" class="ka">-</strong><small>More liquid on Kalshi</small></div>
+</section><button id="run" onclick="runScraper()">Refresh data</button></div></header>
 <div id="notice" class="notice"></div><div class="meta"><span>Last updated: <strong id="updated">-</strong></span><span>Matches: <strong id="count">0</strong></span></div>
-<section class="card"><div class="table-wrap"><table><thead><tr><th>Match</th><th>Polymarket</th><th>Kalshi</th><th>Difference / leader</th></tr></thead>
+<section class="card"><div class="table-wrap"><table><thead><tr>
+<th><button data-sort="match">Match <span class="sort-indicator"></span></button></th>
+<th><button data-sort="polymarket">Polymarket <span class="sort-indicator"></span></button></th>
+<th><button data-sort="kalshi">Kalshi <span class="sort-indicator"></span></button></th>
+<th><button data-sort="difference">Difference / leader <span class="sort-indicator"></span></button></th>
+</tr></thead>
 <tbody id="rows"><tr><td colspan="4" class="empty">No matched data yet. Run the scraper to load results.</td></tr></tbody></table></div></section></main>
 <script>
 const money = value => new Intl.NumberFormat(undefined,{style:"currency",currency:"USD",maximumFractionDigits:2}).format(Number(value)||0);
 const esc = value => String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let currentResults=[], sortColumn="total", sortDirection="descending";
 function show(message, kind){const n=document.getElementById("notice");n.textContent=message;n.className="notice show "+kind}
-function render(data){document.getElementById("updated").textContent=data.updated_at?new Date(data.updated_at).toLocaleString():"-";document.getElementById("count").textContent=data.results.length;
- const rows=document.getElementById("rows"); if(!data.results.length){rows.innerHTML='<tr><td colspan="4" class="empty">No conservatively matched fixtures found.</td></tr>';return}
- rows.innerHTML=data.results.map(r=>{const pm=Number(r.polymarket_liquidity),ka=Number(r.kalshi_liquidity),winner=r.more_liquid==="Tie"?"Tie":r.more_liquid+" higher";const cls=r.more_liquid==="Polymarket"?"pm":r.more_liquid==="Kalshi"?"ka":"tie";
+function updateSortIndicators(){document.querySelectorAll("th button[data-sort]").forEach(button=>{const active=button.dataset.sort===sortColumn;const defaultTotal=sortColumn==="total"&&button.dataset.sort==="match";button.setAttribute("aria-sort",defaultTotal?"other":active?sortDirection:"none");const indicator=button.querySelector(".sort-indicator");indicator.textContent=defaultTotal?(sortDirection==="ascending"?"Σ↑":"Σ↓"):active?(sortDirection==="ascending"?"↑":"↓"):"";indicator.title=defaultTotal?"Sorted by combined liquidity":"";button.setAttribute("aria-label",defaultTotal?"Match; sorted by combined liquidity descending":button.textContent.trim())})}
+function sortedResults(){const sign=sortDirection==="ascending"?1:-1;return [...currentResults].sort((a,b)=>{let left,right;
+ if(sortColumn==="total"){left=Number(a.polymarket_liquidity)+Number(a.kalshi_liquidity);right=Number(b.polymarket_liquidity)+Number(b.kalshi_liquidity)}
+ else if(sortColumn==="polymarket"){left=Number(a.polymarket_liquidity);right=Number(b.polymarket_liquidity)}
+ else if(sortColumn==="kalshi"){left=Number(a.kalshi_liquidity);right=Number(b.kalshi_liquidity)}
+ else if(sortColumn==="difference"){left=Number(a.difference);right=Number(b.difference)}
+ else {left=a.competitors.toLocaleLowerCase();right=b.competitors.toLocaleLowerCase()}
+ const result=typeof left==="string"?left.localeCompare(right):left-right;return result===0?a.competitors.localeCompare(b.competitors):result*sign})}
+function renderRows(){const rows=document.getElementById("rows");if(!currentResults.length){rows.innerHTML='<tr><td colspan="4" class="empty">No conservatively matched fixtures found.</td></tr>';return}
+ rows.innerHTML=sortedResults().map(r=>{const pm=Number(r.polymarket_liquidity),ka=Number(r.kalshi_liquidity),winner=r.more_liquid==="Tie"?"Tie":r.more_liquid+" higher";const cls=r.more_liquid==="Polymarket"?"pm":r.more_liquid==="Kalshi"?"ka":"tie";
  return `<tr><td><div class="match">${esc(r.competitors)}</div><div class="sub">${esc(r.grade)} · ${esc(r.phase)}</div></td><td class="${r.more_liquid==="Polymarket"?"winner":""}">${money(pm)}</td><td class="${r.more_liquid==="Kalshi"?"winner":""}">${money(ka)}</td><td class="${cls}">${money(r.difference)} <span class="badge">${esc(winner)}</span></td></tr>`}).join("")}
+function render(data){currentResults=data.results||[];document.getElementById("updated").textContent=data.updated_at?new Date(data.updated_at).toLocaleString():"-";document.getElementById("count").textContent=currentResults.length;
+ document.getElementById("pm-share").textContent=data.distribution?.polymarket_percent??"0%";document.getElementById("kalshi-share").textContent=data.distribution?.kalshi_percent??"0%";updateSortIndicators();renderRows()}
+document.querySelectorAll("th button[data-sort]").forEach(button=>button.addEventListener("click",()=>{if(sortColumn===button.dataset.sort)sortDirection=sortDirection==="ascending"?"descending":"ascending";else{sortColumn=button.dataset.sort;sortDirection="ascending"}updateSortIndicators();renderRows()}));updateSortIndicators();
 async function load(){const response=await fetch("/api/results");if(response.ok)render(await response.json())}
 async function runScraper(){const button=document.getElementById("run");button.disabled=true;button.textContent="Refreshing…";show("Collecting current markets from Polymarket and Kalshi…","success");
  try{const response=await fetch("/api/scrape",{method:"POST"});const data=await response.json();if(!response.ok)throw new Error(data.error||"Scrape failed");show(`Scrape complete: ${data.count} snapshots collected.`,"success");render(data)}catch(error){show(error.message,"error")}finally{button.disabled=false;button.textContent="Refresh data"}}
-load();setInterval(async()=>{const response=await fetch("/api/status");const status=await response.json();if(status.status==="complete")load()},3000);
+load();
 </script></body></html>"""
 
 
@@ -65,6 +89,18 @@ def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
         "difference": str(comparison.difference),
         "more_liquid": comparison.more_liquid,
         "match_confidence": comparison.confidence,
+    }
+
+
+def _liquidity_distribution(comparisons: list[LiquidityComparison]) -> dict[str, str]:
+    total = len(comparisons)
+    if total == 0:
+        return {"polymarket_percent": "0%", "kalshi_percent": "0%"}
+    polymarket_wins = sum(item.more_liquid == "Polymarket" for item in comparisons)
+    kalshi_wins = sum(item.more_liquid == "Kalshi" for item in comparisons)
+    return {
+        "polymarket_percent": f"{polymarket_wins / total:.0%}",
+        "kalshi_percent": f"{kalshi_wins / total:.0%}",
     }
 
 
@@ -84,10 +120,17 @@ class LiquidityUI:
                 self.updated_at = max(
                     item.polymarket.observed_at for item in comparisons
                 ).isoformat()
+            if self.updated_at is None:
+                latest = connection.execute(
+                    "SELECT MAX(observed_at) FROM liquidity_snapshots"
+                ).fetchone()[0]
+                if latest:
+                    self.updated_at = datetime.fromisoformat(latest.replace("Z", "+00:00")).isoformat()
             return {
                 "status": self.status,
                 "updated_at": self.updated_at,
                 "results": [_comparison_json(item) for item in comparisons],
+                "distribution": _liquidity_distribution(comparisons),
             }
         finally:
             connection.close()
