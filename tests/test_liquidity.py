@@ -22,6 +22,7 @@ from tennis_betting.scraper import collect_once
 from tennis_betting.storage import (
     connect_database, export_liquidity_csv, save_snapshots,
 )
+from tennis_betting.site import build_static_site
 from tennis_betting.ui import HTML, LiquidityUI
 
 
@@ -334,6 +335,16 @@ class LiquidityTests(unittest.TestCase):
                          "volume_fp": "85"},
                     ],
                 }], "cursor": ""}
+            if path == "markets/trades":
+                if params["ticker"] == "winner-one":
+                    return {"trades": [{
+                        "count_fp": "10.00", "yes_price_dollars": "0.5000",
+                        "no_price_dollars": "0.5000", "taker_outcome_side": "yes",
+                    }], "cursor": ""}
+                return {"trades": [{
+                    "count_fp": "20.00", "yes_price_dollars": "0.6000",
+                    "no_price_dollars": "0.4000", "taker_outcome_side": "no",
+                }], "cursor": ""}
             return {"orderbook_fp": {
                 "yes_dollars": [["0.5000", "10.00"]],
                 "no_dollars": [["0.4000", "5.00"]],
@@ -349,7 +360,7 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(snapshot.available_back, Decimal("5.000000"))
         self.assertEqual(snapshot.available_unmatched, Decimal("2.000000"))
         self.assertEqual(snapshot.grade, CompetitionGrade.ATP)
-        self.assertEqual(snapshot.matched_volume, Decimal("155"))
+        self.assertEqual(snapshot.matched_volume, Decimal("13"))
         self.assertEqual(snapshot.raw["orderbook"]["yes_dollars"][0], ["0.5000", "10.00"])
         self.assertEqual(len(snapshot.raw["ui_markets"]), 2)
         self.assertEqual(
@@ -358,8 +369,29 @@ class LiquidityTests(unittest.TestCase):
         )
         self.assertEqual(
             [market["matched_volume"] for market in snapshot.raw["ui_markets"]],
-            ["85", "70"],
+            ["5.000000", "8.000000"],
         )
+
+    def test_kalshi_trade_notional_aggregates_pages_and_uses_outcome_price(self):
+        provider = KalshiPublicLiquidityProvider()
+        requested_cursors = []
+
+        def get_json(path, params=None):
+            self.assertEqual(path, "markets/trades")
+            requested_cursors.append(params.get("cursor"))
+            if params.get("cursor") == "next-page":
+                return {"trades": [{
+                    "count_fp": "2.50", "yes_price_dollars": "0.8800",
+                    "no_price_dollars": "0.1200", "taker_outcome_side": "no",
+                }], "cursor": ""}
+            return {"trades": [{
+                "count_fp": "10.00", "yes_price_dollars": "0.7500",
+                "no_price_dollars": "0.2500", "taker_outcome_side": "yes",
+            }], "cursor": "next-page"}
+
+        provider._get_json = get_json
+        self.assertEqual(provider._market_traded_notional("market"), Decimal("7.800000"))
+        self.assertEqual(requested_cursors, [None, "next-page"])
 
     def test_kalshi_discovers_challenger_series_and_collects_doubles_teams(self):
         provider = KalshiPublicLiquidityProvider(timeout_seconds=1)
@@ -399,6 +431,8 @@ class LiquidityTests(unittest.TestCase):
                     "events": events_by_series[params["series_ticker"]],
                     "cursor": "",
                 }
+            if path == "markets/trades":
+                return {"trades": [], "cursor": ""}
             return {"orderbook_fp": {
                 "yes_dollars": [["0.50", "20"]],
                 "no_dollars": [["0.40", "10"]],
@@ -439,7 +473,7 @@ class LiquidityTests(unittest.TestCase):
                 "available_back": "5", "available_unmatched": "2",
                 "matched_volume": "42",
             }, "kalshi", start),
-            raw={"orderbook": {
+            raw={"matched_volume_basis": "trade_notional_usd", "orderbook": {
                 "yes_dollars": [["0.50", "10"]],
                 "no_dollars": [["0.40", "5"]],
             }},
@@ -510,7 +544,7 @@ class LiquidityTests(unittest.TestCase):
                 "competitors": ["Player Two", "Player One"], "start_time": start,
                 "matched_volume": "42",
             }, "kalshi", start),
-            raw={"orderbook": {
+            raw={"matched_volume_basis": "trade_notional_usd", "orderbook": {
                 "yes_dollars": [["0.50", "10"]],
                 "no_dollars": [["0.40", "5"]],
             }},
@@ -525,8 +559,32 @@ class LiquidityTests(unittest.TestCase):
                 main(["compare-liquidity", "--db", str(Path(directory) / "liquidity.sqlite3"), str(output)])
             self.assertIn(f"Exported 1 matched comparisons to {output}", captured.getvalue())
             text = output.read_text(encoding="utf-8")
-            self.assertIn("higher_reported_matched_volume", text)
+            self.assertIn("higher_matched_notional", text)
             self.assertIn("130", text)
+
+    def test_ui_omits_stored_kalshi_contract_snapshots_until_rescraped(self):
+        start = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
+        polymarket = normalize_snapshot({
+            "event_id": "pm-event", "market_id": "pm-market",
+            "event_name": "Player One vs Player Two",
+            "competitors": ["Player One", "Player Two"], "start_time": start,
+            "matched_volume": "130",
+        }, "polymarket", start)
+        kalshi = normalize_snapshot({
+            "event_id": "k-event", "market_id": "k-market",
+            "event_name": "Player Two vs Player One",
+            "competitors": ["Player Two", "Player One"], "start_time": start,
+            "matched_volume": "42",
+        }, "kalshi", start)
+        with tempfile.TemporaryDirectory() as directory:
+            connection = connect_database(Path(directory) / "liquidity.sqlite3")
+            save_snapshots(connection, [polymarket, kalshi])
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) FROM liquidity_snapshots").fetchone()[0],
+                2,
+            )
+            connection.close()
+            self.assertEqual(LiquidityUI(Path(directory) / "liquidity.sqlite3").results()["results"], [])
 
     def test_ui_reads_current_comparison_results(self):
         start = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
@@ -546,7 +604,8 @@ class LiquidityTests(unittest.TestCase):
             "bids": [{"price": "0.50", "size": "10"}],
             "asks": [{"price": "0.60", "size": "8"}],
         }]})
-        kalshi = replace(kalshi, phase=Phase.PRE_MATCH, raw={"orderbook": {
+        kalshi = replace(kalshi, phase=Phase.PRE_MATCH, raw={
+            "matched_volume_basis": "trade_notional_usd", "orderbook": {
             "yes_dollars": [["0.50", "10"]], "no_dollars": [["0.40", "5"]],
         }})
         with tempfile.TemporaryDirectory() as directory:
@@ -623,6 +682,35 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn('label:"100k+"', HTML)
         self.assertIn("renderRangeDistribution()", HTML)
         self.assertIn("aria-pressed", HTML)
+        self.assertIn(
+            "Provider-reported matched volume; the total USD amount or contracts that have been matched on each platform.",
+            HTML,
+        )
+        self.assertIn(
+            "Current order-book depth; the total liquidity available in the order book across all price levels on each platform.",
+            HTML,
+        )
+        self.assertIn("const STATIC_MODE = false;", HTML)
+        self.assertIn('fetch(STATIC_MODE?"./data.json?ts="+Date.now():"/api/results"', HTML)
+
+    def test_static_site_builds_dashboard_and_data_payload(self):
+        import json
+
+        from tennis_betting.ui import HTML
+
+        payload = {"updated_at": "2026-09-25T12:00:00+00:00", "results": []}
+        with tempfile.TemporaryDirectory() as directory:
+            build_static_site(payload, directory)
+            output = Path(directory)
+            self.assertIn(
+                "const STATIC_MODE = true;",
+                (output / "index.html").read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                json.loads((output / "data.json").read_text(encoding="utf-8")),
+                payload,
+            )
+            self.assertIn("const STATIC_MODE = false;", HTML)
 
     def test_ui_liquidity_distribution_counts_ties_in_denominator(self):
         from tennis_betting.ui import _liquidity_distribution
