@@ -101,7 +101,7 @@ def export_liquidity_csv(connection: sqlite3.Connection, path: str | Path) -> in
     return len(rows)
 
 
-def export_liquidity_comparison_csv(connection: sqlite3.Connection, path: str | Path) -> int:
+def load_latest_comparisons(connection: sqlite3.Connection):
     rows = connection.execute(
         """SELECT snapshot.* FROM liquidity_snapshots AS snapshot
         WHERE snapshot.provider IN ('polymarket', 'kalshi')
@@ -135,7 +135,11 @@ def export_liquidity_comparison_csv(connection: sqlite3.Connection, path: str | 
         )
         for row in rows
     ]
-    comparisons = compare_liquidity_snapshots(snapshots)
+    return compare_liquidity_snapshots(snapshots)
+
+
+def export_liquidity_comparison_csv(connection: sqlite3.Connection, path: str | Path) -> int:
+    comparisons = load_latest_comparisons(connection)
     fieldnames = [
         "competitors", "polymarket_event", "kalshi_event",
         "polymarket_start_time", "kalshi_start_time",

@@ -22,6 +22,7 @@ from tennis_betting.scraper import collect_once
 from tennis_betting.storage import (
     connect_database, export_liquidity_csv, save_snapshots,
 )
+from tennis_betting.ui import LiquidityUI
 
 
 def test_snapshot(source_market_id="test-market", source_url=None):
@@ -414,6 +415,34 @@ class LiquidityTests(unittest.TestCase):
             text = output.read_text(encoding="utf-8")
             self.assertIn("more_liquid", text)
             self.assertIn("Polymarket", text)
+
+    def test_ui_reads_current_comparison_results(self):
+        start = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
+        polymarket = normalize_snapshot({
+            "event_id": "pm-event", "market_id": "pm-market",
+            "event_name": "Player One vs Player Two",
+            "competitors": ["Player One", "Player Two"], "start_time": start,
+        }, "polymarket", start)
+        kalshi = normalize_snapshot({
+            "event_id": "k-event", "market_id": "k-market",
+            "event_name": "Player Two vs Player One",
+            "competitors": ["Player Two", "Player One"], "start_time": start,
+        }, "kalshi", start)
+        polymarket = replace(polymarket, raw={"order_books": [{
+            "bids": [{"price": "0.50", "size": "10"}],
+            "asks": [{"price": "0.60", "size": "8"}],
+        }]})
+        kalshi = replace(kalshi, raw={"orderbook": {
+            "yes_dollars": [["0.50", "10"]], "no_dollars": [["0.40", "5"]],
+        }})
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "liquidity.sqlite3"
+            connection = connect_database(db)
+            save_snapshots(connection, [polymarket, kalshi])
+            connection.close()
+            payload = LiquidityUI(db).results()
+            self.assertEqual(len(payload["results"]), 1)
+            self.assertEqual(payload["results"][0]["more_liquid"], "Polymarket")
 
 
 if __name__ == "__main__":
