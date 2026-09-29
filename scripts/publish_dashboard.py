@@ -15,6 +15,7 @@ def main() -> int:
     )
     parser.add_argument("--output-directory", default="site")
     parser.add_argument("--history-file", default="previous-history.json")
+    parser.add_argument("--refresh-api-url", default="")
     args = parser.parse_args()
 
     with tempfile.TemporaryDirectory(prefix="tennis-liquidity-") as temporary_directory:
@@ -25,7 +26,7 @@ def main() -> int:
     history = json.loads(history_file.read_text(encoding="utf-8")) if history_file.exists() else []
     if not isinstance(history, list):
         raise ValueError("history file must contain a JSON array")
-    build_static_site(data, args.output_directory, history)
+    build_static_site(data, args.output_directory, history, args.refresh_api_url)
     print(f"Published {len(data['results'])} matched fixtures to {args.output_directory}")
     return 0
 

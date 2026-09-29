@@ -114,13 +114,16 @@ def build_static_site(
     data: dict[str, Any],
     output_directory: str | Path,
     history: Iterable[dict[str, Any]] = (),
+    refresh_api_url: str = "",
 ) -> None:
     output = Path(output_directory)
     output.mkdir(parents=True, exist_ok=True)
-    (output / "index.html").write_text(
-        HTML.replace("const STATIC_MODE = false;", "const STATIC_MODE = true;"),
-        encoding="utf-8",
+    html = HTML.replace("const STATIC_MODE = false;", "const STATIC_MODE = true;")
+    html = html.replace(
+        'const REFRESH_API_BASE = "";',
+        f"const REFRESH_API_BASE = {json.dumps(refresh_api_url.rstrip('/'))};",
     )
+    (output / "index.html").write_text(html, encoding="utf-8")
     (output / "data.json").write_text(
         json.dumps(data, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",

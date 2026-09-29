@@ -1,0 +1,13 @@
+name = "tennis-liquidity-refresh"
+main = "src/index.js"
+compatibility_date = "2026-09-29"
+
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "SET_AFTER_CREATING_KV_NAMESPACE"
+
+[vars]
+PUBLIC_ORIGIN = "https://adambyrne.github.io"
+GITHUB_OWNER = "adambyrne"
+GITHUB_REPO = "tennis-exchange-liquidity-scraper"
+WORKFLOW_ID = "publish-dashboard.yml"
