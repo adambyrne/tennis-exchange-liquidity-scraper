@@ -120,7 +120,11 @@ and match status (pre-match, in-play, or both); both summary tables and the
 results update together. The tournament summary shows leader percentages by
 type and an aggregate total. The liquidity-range summary groups matches by combined
 amount in the active view (<5k, 5k-25k, 25k-100k, and 100k+) and shows counts
-and leader percentages. Expanded market rows also switch between matched
+and leader percentages. Expand a liquidity range to see its grade-level match
+counts and platform leader percentages. The tournament summary includes the
+average combined Polymarket and Kalshi amount per match, formatted in USD,
+with the Total row calculated across all filtered matches. Expanded market
+rows also switch between matched
 market amounts and order-book depth; Polymarket matched volume is the market
 total shared across its outcome tokens. Older snapshots without per-market
 detail show their stored aggregate depth as a fallback.
