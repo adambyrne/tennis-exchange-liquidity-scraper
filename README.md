@@ -139,14 +139,40 @@ Stop it with `Ctrl+C`.
 The repository includes a GitHub Actions workflow that scrapes both public
 providers, builds a static dashboard, and deploys it to GitHub Pages when
 manually started from the dashboard or repository's Actions tab. The hosted
-page is public and requires no local Python process. **Run manual refresh**
-opens the workflow in GitHub; a signed-in user with repository write access
-must select **Run workflow**. This permission requirement is imposed by GitHub
-Actions; a public static page cannot securely start a privileged workflow for
-anonymous visitors. After the run succeeds, return to the dashboard and select
-**Reload published data** to display the new scrape. No periodic scrape or
-automatic browser polling is configured, so the page retains the last
-successfully published data until a user with permission triggers another run.
+page is public and requires no local Python process. To enable direct refresh
+from the page, deploy the authenticated Cloudflare Worker in `refresh_worker/`
+and set the repository Actions variable `DASHBOARD_REFRESH_API_URL` to its
+`workers.dev` URL. The one-time setup requires a Cloudflare account, a KV
+namespace, and a GitHub App installed on this repository with **Actions: Read
+and write** permission. Create the KV namespace and deploy the Worker:
+
+```bash
+npx wrangler kv namespace create SESSIONS --config refresh_worker/wrangler.toml
+# Copy the returned namespace ID into refresh_worker/wrangler.toml.
+npx wrangler deploy --config refresh_worker/wrangler.toml
+```
+
+Set the GitHub App's OAuth callback URL to `https://<worker-host>/auth/callback`,
+then save the App's client ID and client secret as Worker secrets:
+
+```bash
+npx wrangler secret put GITHUB_APP_CLIENT_ID --config refresh_worker/wrangler.toml
+npx wrangler secret put GITHUB_APP_CLIENT_SECRET --config refresh_worker/wrangler.toml
+```
+
+Add the Worker URL under repository **Settings > Secrets and variables >
+Actions > Variables** as `DASHBOARD_REFRESH_API_URL`, then run the publishing
+workflow once to publish the configured UI. **Refresh data** opens a GitHub
+sign-in popup, starts the scrape directly, shows progress while GitHub Actions
+runs, and reloads results/history after successful deployment. Each person
+triggering a scrape must sign in with a GitHub account that has write access to
+this repository. The GitHub token stays in the Worker and is never sent to the
+browser; the browser receives only a short-lived opaque session token. Do not
+put GitHub credentials or tokens in Pages files or repository variables.
+Without the Worker URL configured, the button falls back to opening the Actions
+workflow page. No periodic scrape or automatic browser polling is configured,
+so data remains at the latest successful refresh until a user triggers another
+run.
 The collapsible **Performance History** section stores the last 100 successful
 refreshes in the published site. Each record retains its full matched-result
 snapshot and separate Matched Amount and Order Book Depth tournament and
@@ -155,7 +181,8 @@ counts. Switch the active data view to inspect that view's history; sort by
 refresh number, timestamp, leader share, or match count, and expand a row to
 review its tournament and range details. Platform percentages are the share of
 matches led by that venue; ties remain in the denominator but count as a win
-for neither platform.
+for neither platform. A highlighted Total row reports the number of refreshes
+and the average platform leader shares and match count for the active view.
 Pushes that change the workflow or scraper code also run the publishing
 workflow. GitHub Pages is enabled by the workflow when repository policy
 permits; if Pages is restricted, an administrator must allow Pages

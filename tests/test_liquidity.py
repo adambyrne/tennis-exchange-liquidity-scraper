@@ -718,14 +718,30 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn("https://github.com/adambyrne/tennis-exchange-liquidity-scraper/actions/workflows/publish-dashboard.yml", HTML)
         self.assertIn('window.open("https://github.com/adambyrne/tennis-exchange-liquidity-scraper/actions/workflows/publish-dashboard.yml"', HTML)
         self.assertIn("function reloadPublished()", HTML)
+        self.assertIn('const REFRESH_API_BASE = "";', HTML)
+        self.assertIn("function authorizeRefresh()", HTML)
+        self.assertIn("async function runHostedScrape(button)", HTML)
+        self.assertIn('fetch(`${REFRESH_API_BASE}/api/refresh`', HTML)
+        self.assertIn('fetch(`${REFRESH_API_BASE}/api/refresh/status?', HTML)
+        self.assertIn("Scrape complete. The latest published results and performance history are loaded.", HTML)
         self.assertNotIn('setInterval(()=>load()', HTML)
         self.assertIn('<summary>Performance History</summary>', HTML)
         self.assertIn('id="history-rows"', HTML)
         self.assertIn('data-history-sort="timestamp"', HTML)
         self.assertIn('data-history-expand="${entry.refresh}"', HTML)
         self.assertIn('function renderHistory()', HTML)
+        self.assertIn('class="history-total-row"', HTML)
+        self.assertIn('const snapshots=rows.map(entry=>entry.views[view])', HTML)
+        self.assertIn('average("polymarket_percent")', HTML)
+        self.assertIn('average("kalshi_percent")', HTML)
+        self.assertIn('average("total_matches")', HTML)
         self.assertIn('view=dataView==="matched"?"matched":"depth"', HTML)
         self.assertIn('fetch("./history.json?ts="+Date.now()', HTML)
+        worker_path = Path(__file__).resolve().parents[1] / "refresh_worker" / "src" / "index.js"
+        worker_source = worker_path.read_text(encoding="utf-8")
+        self.assertIn("inputs: { refresh_request_id: requestId }", worker_source)
+        self.assertIn("item.display_title?.includes(requestId)", worker_source)
+        self.assertIn("requireOrigin(request, env)", worker_source)
 
     def test_static_site_builds_dashboard_and_data_payload(self):
         import json
@@ -736,12 +752,13 @@ class LiquidityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             build_static_site(payload, directory)
             output = Path(directory)
+            hosted_html = (output / "index.html").read_text(encoding="utf-8")
             self.assertIn(
                 "const STATIC_MODE = true;",
-                (output / "index.html").read_text(encoding="utf-8"),
+                hosted_html,
             )
             self.assertIn(
-                "Run manual refresh",
+                "Direct refresh is not configured yet",
                 (output / "index.html").read_text(encoding="utf-8"),
             )
             self.assertEqual(
@@ -752,6 +769,11 @@ class LiquidityTests(unittest.TestCase):
             self.assertEqual(len(history), 1)
             self.assertEqual(history[0]["refresh"], 1)
             self.assertEqual(history[0]["results"], payload["results"])
+            build_static_site(payload, directory, refresh_api_url="https://refresh.example.workers.dev/")
+            self.assertIn(
+                'const REFRESH_API_BASE = "https://refresh.example.workers.dev";',
+                (output / "index.html").read_text(encoding="utf-8"),
+            )
             self.assertIn("const STATIC_MODE = false;", HTML)
 
     def test_performance_history_records_both_views_and_keeps_latest_hundred(self):

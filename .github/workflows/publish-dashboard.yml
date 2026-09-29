@@ -1,7 +1,13 @@
 name: Publish tennis liquidity dashboard
+run-name: Dashboard refresh (${{ inputs.refresh_request_id || github.event_name }})
 
 on:
   workflow_dispatch:
+    inputs:
+      refresh_request_id:
+        description: Internal request identifier for a dashboard refresh
+        required: false
+        type: string
   push:
     branches: [main]
     paths:
@@ -45,7 +51,13 @@ jobs:
             exit 1
           fi
       - name: Scrape current markets and build site
-        run: python -m scripts.publish_dashboard --output-directory site --history-file previous-history.json
+        env:
+          DASHBOARD_REFRESH_API_URL: ${{ vars.DASHBOARD_REFRESH_API_URL }}
+        run: >-
+          python -m scripts.publish_dashboard
+          --output-directory site
+          --history-file previous-history.json
+          --refresh-api-url "$DASHBOARD_REFRESH_API_URL"
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
         with:
