@@ -31,8 +31,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Download prior performance history
+        shell: bash
+        run: |
+          status=$(curl --silent --show-error --location \
+            --output previous-history.json \
+            --write-out '%{http_code}' \
+            "https://adambyrne.github.io/tennis-exchange-liquidity-scraper/history.json?run=${GITHUB_RUN_ID}")
+          if [ "$status" = "404" ]; then
+            printf '[]\n' > previous-history.json
+          elif [ "$status" != "200" ]; then
+            echo "Could not load previous performance history (HTTP $status)." >&2
+            exit 1
+          fi
       - name: Scrape current markets and build site
-        run: python -m scripts.publish_dashboard --output-directory site
+        run: python -m scripts.publish_dashboard --output-directory site --history-file previous-history.json
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
         with:
