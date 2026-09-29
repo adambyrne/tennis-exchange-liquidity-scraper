@@ -24,7 +24,7 @@ from tennis_betting.scraper import collect_once
 from tennis_betting.storage import (
     connect_database, export_liquidity_csv, save_snapshots,
 )
-from tennis_betting.site import build_static_site
+from tennis_betting.site import HISTORY_LIMIT, append_history, build_static_site
 from tennis_betting.ui import HTML, LiquidityUI
 
 
@@ -719,6 +719,13 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn('window.open("https://github.com/adambyrne/tennis-exchange-liquidity-scraper/actions/workflows/publish-dashboard.yml"', HTML)
         self.assertIn("function reloadPublished()", HTML)
         self.assertNotIn('setInterval(()=>load()', HTML)
+        self.assertIn('<summary>Performance History</summary>', HTML)
+        self.assertIn('id="history-rows"', HTML)
+        self.assertIn('data-history-sort="timestamp"', HTML)
+        self.assertIn('data-history-expand="${entry.refresh}"', HTML)
+        self.assertIn('function renderHistory()', HTML)
+        self.assertIn('view=dataView==="matched"?"matched":"depth"', HTML)
+        self.assertIn('fetch("./history.json?ts="+Date.now()', HTML)
 
     def test_static_site_builds_dashboard_and_data_payload(self):
         import json
@@ -741,7 +748,71 @@ class LiquidityTests(unittest.TestCase):
                 json.loads((output / "data.json").read_text(encoding="utf-8")),
                 payload,
             )
+            history = json.loads((output / "history.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(history), 1)
+            self.assertEqual(history[0]["refresh"], 1)
+            self.assertEqual(history[0]["results"], payload["results"])
             self.assertIn("const STATIC_MODE = false;", HTML)
+
+    def test_performance_history_records_both_views_and_keeps_latest_hundred(self):
+        result_one = {
+            "grade": "atp",
+            "polymarket_volume": "6000",
+            "kalshi_volume": "4000",
+            "polymarket_depth": "2000",
+            "kalshi_depth": "4000",
+        }
+        result_two = {
+            "grade": "wta",
+            "polymarket_volume": "1000",
+            "kalshi_volume": "3000",
+            "polymarket_depth": "9000",
+            "kalshi_depth": "1000",
+        }
+        data = {
+            "updated_at": "2026-09-29T08:30:00+00:00",
+            "results": [result_one, result_two],
+        }
+
+        history = append_history(data)
+        entry = history[0]
+        self.assertEqual(entry["refresh"], 1)
+        self.assertEqual(entry["timestamp"], data["updated_at"])
+        self.assertEqual(entry["results"], data["results"])
+        self.assertEqual(entry["views"]["matched"]["polymarket_percent"], 50)
+        self.assertEqual(entry["views"]["matched"]["kalshi_percent"], 50)
+        self.assertEqual(entry["views"]["depth"]["polymarket_percent"], 50)
+        self.assertEqual(entry["views"]["depth"]["kalshi_percent"], 50)
+        self.assertEqual(entry["views"]["matched"]["total_matches"], 2)
+        self.assertEqual(entry["views"]["depth"]["total_matches"], 2)
+        self.assertEqual(
+            {row["label"] for row in entry["views"]["matched"]["tournaments"]},
+            {"atp", "wta"},
+        )
+        tournament_shares = {
+            row["label"]: (row["polymarket_percent"], row["kalshi_percent"])
+            for row in entry["views"]["matched"]["tournaments"]
+        }
+        self.assertEqual(tournament_shares["atp"], (100, 0))
+        self.assertEqual(tournament_shares["wta"], (0, 100))
+        self.assertEqual(
+            {row["label"] for row in entry["views"]["matched"]["ranges"]},
+            {"<5k", "5k-25k", "25k-100k", "100k+"},
+        )
+        self.assertEqual(
+            [row["total_matches"] for row in entry["views"]["matched"]["ranges"]],
+            [1, 1, 0, 0],
+        )
+        self.assertEqual(
+            [row["total_matches"] for row in entry["views"]["depth"]["ranges"]],
+            [0, 2, 0, 0],
+        )
+        bounded = append_history(
+            data, [{"refresh": refresh} for refresh in range(1, HISTORY_LIMIT + 1)]
+        )
+        self.assertEqual(len(bounded), HISTORY_LIMIT)
+        self.assertEqual(bounded[-1]["refresh"], HISTORY_LIMIT + 1)
+        self.assertEqual(bounded[0]["refresh"], 2)
 
     def test_ui_liquidity_distribution_counts_ties_in_denominator(self):
         from tennis_betting.ui import _liquidity_distribution

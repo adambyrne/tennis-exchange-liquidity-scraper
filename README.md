@@ -147,6 +147,15 @@ anonymous visitors. After the run succeeds, return to the dashboard and select
 **Reload published data** to display the new scrape. No periodic scrape or
 automatic browser polling is configured, so the page retains the last
 successfully published data until a user with permission triggers another run.
+The collapsible **Performance History** section stores the last 100 successful
+refreshes in the published site. Each record retains its full matched-result
+snapshot and separate Matched Amount and Order Book Depth tournament and
+liquidity-range breakdowns, including platform leader percentages and match
+counts. Switch the active data view to inspect that view's history; sort by
+refresh number, timestamp, leader share, or match count, and expand a row to
+review its tournament and range details. Platform percentages are the share of
+matches led by that venue; ties remain in the denominator but count as a win
+for neither platform.
 Pushes that change the workflow or scraper code also run the publishing
 workflow. GitHub Pages is enabled by the workflow when repository policy
 permits; if Pages is restricted, an administrator must allow Pages
