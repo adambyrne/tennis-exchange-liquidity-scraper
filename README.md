@@ -193,6 +193,16 @@ matches led by that venue; ties remain in the denominator but count as a win
 for neither platform. A highlighted Total row reports the number of refreshes
 and the average platform leader shares and match count, plus match-weighted
 overall and per-grade liquidity averages for the active view.
+**Betting Activity by Grade** tracks positive increases in provider-reported
+matched volume between successive successful refreshes, grouped by competition
+grade and time remaining until scheduled start (or in-play status). The first
+observation of each match establishes a baseline; it is not treated as new
+activity because its cumulative volume may have accrued before tracking began.
+Each increment is assigned to the bucket at the later observation, so long gaps
+between refreshes can blur the exact timing of activity. Records without a
+scheduled start time and volume decreases are excluded. The table aggregates
+activity in retained history, while each history row's Details shows that
+refresh's grade-by-period USD increments.
 Pushes that change the workflow or scraper code also run the publishing
 workflow. GitHub Pages is enabled by the workflow when repository policy
 permits; if Pages is restricted, an administrator must allow Pages
