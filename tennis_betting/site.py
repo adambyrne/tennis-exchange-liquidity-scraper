@@ -20,6 +20,7 @@ def _leader_percentages(results: list[dict[str, Any]], view: str) -> dict[str, A
     total = len(results)
     polymarket_wins = 0
     kalshi_wins = 0
+    combined_liquidity = Decimal(0)
     for result in results:
         if view == "matched":
             polymarket = Decimal(str(result.get("polymarket_volume", 0) or 0))
@@ -29,10 +30,14 @@ def _leader_percentages(results: list[dict[str, Any]], view: str) -> dict[str, A
             kalshi = Decimal(str(result.get("kalshi_depth", 0) or 0))
         polymarket_wins += polymarket > kalshi
         kalshi_wins += kalshi > polymarket
+        combined_liquidity += polymarket + kalshi
     return {
         "total_matches": total,
         "polymarket_percent": (polymarket_wins / total * 100) if total else 0,
         "kalshi_percent": (kalshi_wins / total * 100) if total else 0,
+        "average_liquidity": (
+            float(combined_liquidity / total) if total else 0
+        ),
     }
 
 
@@ -105,6 +110,15 @@ def append_history(
         for entry in entries
     ):
         raise ValueError("history entries must have an integer refresh number")
+    entries = [
+        _history_entry(
+            {"updated_at": entry.get("timestamp"), "results": entry["results"]},
+            entry["refresh"],
+        )
+        if isinstance(entry.get("results"), list)
+        else entry
+        for entry in entries
+    ]
     next_refresh = max((entry["refresh"] for entry in entries), default=0) + 1
     entries.append(_history_entry(data, next_refresh))
     return entries[-HISTORY_LIMIT:]
