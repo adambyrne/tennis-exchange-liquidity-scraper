@@ -60,6 +60,7 @@ button:disabled{opacity:.6;cursor:wait}.meta{display:flex;gap:18px;flex-wrap:wra
 .history-card{margin:24px 0;padding:0;overflow:hidden}
 .history-card>summary{padding:18px 20px;cursor:pointer;font-weight:800;font-size:1.05rem;color:#24324a}
 .history-card[open]>summary{border-bottom:1px solid #e3e8f1}
+.history-card>.history-title{margin:0;padding:18px 20px;font-size:1.05rem;color:#24324a;border-bottom:1px solid #e3e8f1}
 .history-wrap{overflow-x:auto;padding:0 18px 18px}
 .history-table{min-width:850px;border-collapse:collapse}
 .history-table th,.history-table td{padding:12px 14px;border-bottom:1px solid #edf0f5;white-space:nowrap}
@@ -97,6 +98,10 @@ button:disabled{opacity:.6;cursor:wait}.meta{display:flex;gap:18px;flex-wrap:wra
 .activity-detail-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .unit-note{font-size:.72rem!important;margin:10px 12px 0;color:#718096!important}
 .top-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}
+.page-tabs{display:flex;gap:8px;margin:0 0 22px;padding:5px;border:1px solid #dfe6f0;border-radius:13px;background:#e9eff8;width:max-content;max-width:100%}
+.page-tab{padding:10px 16px;background:transparent;color:#53617a;border-radius:9px;white-space:nowrap}
+.page-tab[aria-pressed="true"]{background:#fff;color:#1749a5;box-shadow:0 3px 9px #1720331c}
+.page-panel[hidden]{display:none}
 .view-toggle{display:flex;align-items:center;gap:3px;padding:5px;border:1px solid #d6e0f0;border-radius:13px;background:#e9eff8;width:max-content;max-width:100%;box-shadow:inset 0 1px 2px #15294a0a}
 .view-toggle button{padding:11px 16px;background:transparent;color:#53617a;border-radius:9px;white-space:nowrap}
 .view-toggle button[aria-pressed="true"]{background:#fff;color:#1749a5;box-shadow:0 3px 9px #1720331c}
@@ -150,7 +155,7 @@ tbody#rows>tr:not(.details-row):hover .expand-button{background:#dbe7ff}
 @keyframes shimmer{100%{transform:translateX(100%)}}@keyframes progress{0%{transform:translateX(-110%)}100%{transform:translateX(310%)}}
 @media(max-width:980px){header{align-items:flex-start;flex-direction:column}.top-actions{width:100%;justify-content:flex-start}}
 @media(max-width:720px){.market-panels,.summary-grid{grid-template-columns:1fr}.distribution{width:100%}.filters{align-items:stretch}.filter{flex:1 1 180px}select{width:100%}}
-@media(max-width:650px){.shell{padding:24px 13px}.top-actions{align-items:stretch;flex-direction:column}.display-control,.view-toggle,.mode-description{width:100%}.view-toggle button{flex:1;padding:10px 8px}button#run{width:100%}.detail-cell{padding:15px!important}.history-breakdowns{grid-template-columns:1fr}}
+@media(max-width:650px){.shell{padding:24px 13px}.top-actions{align-items:stretch;flex-direction:column}.display-control,.view-toggle,.mode-description{width:100%}.view-toggle button{flex:1;padding:10px 8px}.page-tabs{width:100%}.page-tab{flex:1;padding:10px 8px}button#run{width:100%}.detail-cell{padding:15px!important}.history-breakdowns{grid-template-columns:1fr}}
 </style></head>
 <body><main class="shell"><header><div><h1>Tennis market volume</h1><p>Compare matched amounts or current order-book depth across Polymarket and Kalshi.</p></div>
 <div class="top-actions"><div class="display-control"><div class="view-toggle" role="group" aria-label="Data display">
@@ -159,6 +164,11 @@ tbody#rows>tr:not(.details-row):hover .expand-button{background:#dbe7ff}
 </div><div class="mode-description" id="mode-description" aria-live="polite"><span class="mode-description-icon" aria-hidden="true">ⓘ</span><span id="mode-description-text"></span></div></div><button id="run" onclick="runScraper()">Refresh data</button><button id="reload-published" type="button" onclick="reloadPublished()" hidden>Reload published data</button></div></header>
 <div id="notice" class="notice" role="status" aria-live="polite"></div><div id="scrape-progress" class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden aria-label="Scrape progress"><i></i></div>
 <div class="meta"><span>Last updated: <strong id="updated">-</strong></span><span>Matches: <strong id="count">0</strong></span></div>
+<nav class="page-tabs" role="group" aria-label="Dashboard views">
+<button type="button" class="page-tab" data-page-tab="main" aria-pressed="true">Main</button>
+<button type="button" class="page-tab" data-page-tab="historical" aria-pressed="false">Historical Data</button>
+</nav>
+<div id="main-panel" class="page-panel">
 <section class="filters" aria-label="Match filters">
 <label class="filter" for="tournament-filter">Tournament type
 <select id="tournament-filter"><option value="all">All tournaments</option></select></label>
@@ -177,25 +187,29 @@ tbody#rows>tr:not(.details-row):hover .expand-button{background:#dbe7ff}
 <tbody id="range-distribution"><tr><td colspan="5">No matched data</td></tr></tbody></table>
 <p class="unit-note" id="range-unit-note">Ranges use the combined amount in the selected view.</p>
 </section></div>
-<section class="activity-card card" aria-labelledby="activity-heading"><h2 id="activity-heading">Betting Activity by Grade</h2>
-<p class="activity-note">Share of newly observed matched-volume increases in the retained refresh history, grouped by scheduled start time at observation. "In-Play" means the scheduled start has passed; live match status is not independently verified. The first observation of a match is only a baseline, and matches without a scheduled start time are omitted.</p>
-<div class="activity-wrap"><table class="activity-table"><thead><tr id="activity-header"></tr></thead><tbody id="activity-rows"><tr><td colspan="7" class="history-empty">Refresh data again to begin measuring volume changes.</td></tr></tbody></table></div></section>
-<details class="history-card card"><summary>Performance History</summary>
-<div class="history-wrap"><table class="history-table"><thead><tr id="history-header"></tr></thead><tbody id="history-rows"><tr><td colspan="8" class="history-empty">No refresh history yet.</td></tr></tbody></table></div></details>
 <section class="card"><div class="table-wrap"><table><thead><tr>
 <th><button data-sort="match">Match <span class="sort-indicator"></span></button></th>
 <th><button data-sort="polymarket"><span id="polymarket-heading">Polymarket matched volume (USD)</span> <span class="sort-indicator"></span></button></th>
 <th><button data-sort="kalshi"><span id="kalshi-heading">Kalshi matched notional (USD)</span> <span class="sort-indicator"></span></button></th>
 <th><button data-sort="leader"><span id="leader-heading">Reported-volume leader*</span> <span class="sort-indicator"></span></button></th>
 </tr></thead>
-<tbody id="rows"><tr><td colspan="4" class="empty">No matched data yet. Run the scraper to load results.</td></tr></tbody></table></div></section></main>
+<tbody id="rows"><tr><td colspan="4" class="empty">No matched data yet. Run the scraper to load results.</td></tr></tbody></table></div></section>
+</div>
+<div id="historical-panel" class="page-panel" hidden>
+<section class="activity-card card" aria-labelledby="activity-heading"><h2 id="activity-heading">Betting Activity by Time Window</h2>
+<p class="activity-note">Share of newly observed matched-volume increases in the retained refresh history, grouped by scheduled start time at observation. "In-Play" means the scheduled start has passed; live match status is not independently verified. The first observation of a match is only a baseline, and matches without a scheduled start time are omitted.</p>
+<div class="activity-wrap"><table class="activity-table"><thead><tr id="activity-header"></tr></thead><tbody id="activity-rows"><tr><td colspan="7" class="history-empty">Refresh data again to begin measuring volume changes.</td></tr></tbody></table></div></section>
+<section class="history-card card" aria-labelledby="history-heading"><h2 class="history-title" id="history-heading">Performance History</h2>
+<div class="history-wrap"><table class="history-table"><thead><tr id="history-header"></tr></thead><tbody id="history-rows"><tr><td colspan="8" class="history-empty">No refresh history yet.</td></tr></tbody></table></div></section>
+</div>
+</main>
 <script>
 const number = value => new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(Number(value)||0);
 const usd = value => new Intl.NumberFormat(undefined,{style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(value)||0);
 const esc = value => String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const STATIC_MODE = false;
 const REFRESH_API_BASE = "";
-const HISTORY_GRADE_ORDER=["grand_slam","atp","atp_challenger","wta","itf","utr","unknown"];
+const HISTORY_GRADE_ORDER=["grand_slam","atp","wta","itf"],HISTORY_EXCLUDED_GRADES=["atp_challenger","utr","unknown"];
 const ACTIVITY_BUCKETS=[{key:"before_24h",label:"24h+ Before"},{key:"before_24_12h",label:"24-12h Before"},{key:"before_12_2h",label:"12-2h Before"},{key:"before_2_0h",label:"2-0h Before"},{key:"in_play",label:"In-Play"}];
 let currentResults=[], allHistory=[], refreshSession=null, sortColumn="polymarket", sortDirection="descending", selectedGrade="all", selectedStatus="both", dataView="matched", expandedMatches=new Set(), expandedRanges=new Set(), expandedHistory=new Set(), historySortColumn="refresh", historySortDirection="descending", progressTimer;
 function show(message, kind){const n=document.getElementById("notice");n.textContent=message;n.className="notice show "+kind}
@@ -239,7 +253,7 @@ function activityDetailMarkup(activity){if(!activity||!activity.grades?.length)r
 function historyHeaderMarkup(grades){return `<th><button type="button" data-history-sort="refresh">Refresh # <span class="history-sort-indicator"></span></button></th><th><button type="button" data-history-sort="timestamp">Timestamp <span class="history-sort-indicator"></span></button></th><th>View type</th><th><button type="button" data-history-sort="polymarket_percent">Polymarket % <span class="history-sort-indicator"></span></button></th><th><button type="button" data-history-sort="kalshi_percent">Kalshi % <span class="history-sort-indicator"></span></button></th><th><button type="button" data-history-sort="total_matches">Total Matches <span class="history-sort-indicator"></span></button></th><th>Avg Liquidity (USD)</th>${grades.map(grade=>`<th>${esc(gradeLabel(grade))} Avg (USD)</th>`).join("")}<th>Details</th>`}
 function weightedAverageLiquidity(rows,grade=null){let amount=0,matches=0;for(const entry of rows){const summary=entry.views?.[dataView==="matched"?"matched":"depth"];if(!summary)continue;if(grade===null){if(summary.average_liquidity===undefined)continue;const count=Number(summary.total_matches)||0;amount+=Number(summary.average_liquidity)*count;matches+=count}else{const row=(summary.tournaments||[]).find(item=>item.label===grade);if(!row||row.average_liquidity===undefined)continue;const count=Number(row.total_matches)||0;amount+=Number(row.average_liquidity)*count;matches+=count}}return matches?amount/matches:null}
 function updateHistorySortIndicators(){document.querySelectorAll("[data-history-sort]").forEach(button=>{const active=button.dataset.historySort===historySortColumn;button.setAttribute("aria-sort",active?historySortDirection:"none");button.querySelector(".history-sort-indicator").textContent=active?(historySortDirection==="ascending"?"↑":"↓"):""})}
-function renderHistory(){const body=document.getElementById("history-rows"),view=dataView==="matched"?"matched":"depth",viewLabel=view==="matched"?"Matched Amount":"Order Book Depth";const rows=allHistory.filter(entry=>entry.views&&entry.views[view]).sort((a,b)=>{const left=a.views[view][historySortColumn]??a[historySortColumn],right=b.views[view][historySortColumn]??b[historySortColumn];const comparison=typeof left==="string"?left.localeCompare(right):Number(left)-Number(right);return comparison===0?a.refresh-b.refresh:comparison*(historySortDirection==="ascending"?1:-1)}),grades=[...new Set([...HISTORY_GRADE_ORDER,...rows.flatMap(entry=>(entry.views[view].tournaments||[]).map(row=>row.label))])].sort((a,b)=>gradeLabel(a).localeCompare(gradeLabel(b))),columnCount=8+grades.length;document.getElementById("history-header").innerHTML=historyHeaderMarkup(grades);if(!rows.length){body.innerHTML=`<tr><td colspan="${columnCount}" class="history-empty">No refresh history yet. Run a manual refresh to record the first snapshot.</td></tr>`;updateHistorySortIndicators();return}
+function renderHistory(){const body=document.getElementById("history-rows"),view=dataView==="matched"?"matched":"depth",viewLabel=view==="matched"?"Matched Amount":"Order Book Depth";const rows=allHistory.filter(entry=>entry.views&&entry.views[view]).sort((a,b)=>{const left=a.views[view][historySortColumn]??a[historySortColumn],right=b.views[view][historySortColumn]??b[historySortColumn];const comparison=typeof left==="string"?left.localeCompare(right):Number(left)-Number(right);return comparison===0?a.refresh-b.refresh:comparison*(historySortDirection==="ascending"?1:-1)}),grades=[...new Set([...HISTORY_GRADE_ORDER,...rows.flatMap(entry=>(entry.views[view].tournaments||[]).map(row=>row.label))])].filter(grade=>!HISTORY_EXCLUDED_GRADES.includes(grade)).sort((a,b)=>gradeLabel(a).localeCompare(gradeLabel(b))),columnCount=8+grades.length;document.getElementById("history-header").innerHTML=historyHeaderMarkup(grades);if(!rows.length){body.innerHTML=`<tr><td colspan="${columnCount}" class="history-empty">No refresh history yet. Run a manual refresh to record the first snapshot.</td></tr>`;updateHistorySortIndicators();return}
  const average=key=>rows.reduce((sum,entry)=>sum+Number(entry.views[view][key]||0),0)/rows.length,overallAverage=weightedAverageLiquidity(rows);
  const totalRow=`<tr class="history-total-row"><td>${number(rows.length)} refreshes</td><td>-</td><td>Average (${viewLabel})</td><td class="pm-history">${number(average("polymarket_percent"))}%</td><td class="ka-history">${number(average("kalshi_percent"))}%</td><td>${number(average("total_matches"))}</td><td class="liquidity-average">${overallAverage===null?"-":usd(overallAverage)}</td>${grades.map(grade=>{const value=weightedAverageLiquidity(rows,grade);return `<td class="grade-average">${value===null?"-":usd(value)}</td>`}).join("")}<td></td></tr>`;
  body.innerHTML=rows.map(entry=>{const summary=entry.views[view],expanded=expandedHistory.has(entry.refresh),timestamp=entry.timestamp?new Date(entry.timestamp).toLocaleString():"-",gradeRows=new Map((summary.tournaments||[]).map(row=>[row.label,row]));return `<tr><td>${number(entry.refresh)}</td><td>${esc(timestamp)}</td><td>${viewLabel}</td><td class="pm-history">${number(summary.polymarket_percent)}%<span class="mini-bar"><i style="width:${summary.polymarket_percent}%"></i></span></td><td class="ka-history">${number(summary.kalshi_percent)}%<span class="mini-bar kalshi"><i style="width:${summary.kalshi_percent}%"></i></span></td><td>${number(summary.total_matches)}</td><td class="liquidity-average">${Number(summary.total_matches)>0&&summary.average_liquidity!==undefined?usd(summary.average_liquidity):"-"}</td>${grades.map(grade=>{const gradeSummary=gradeRows.get(grade),value=gradeSummary?.average_liquidity;return `<td class="grade-average">${Number(gradeSummary?.total_matches)>0&&value!==undefined?usd(value):"-"}</td>`}).join("")}<td><button type="button" class="history-detail-button" data-history-expand="${entry.refresh}" aria-expanded="${expanded}">${expanded?"Hide":"View"}</button></td></tr><tr class="history-detail-row" ${expanded?"":"hidden"}><td colspan="${columnCount}"><div class="history-breakdowns">${historyBreakdownMarkup("Tournament type",summary.tournaments||[])}${historyBreakdownMarkup("Liquidity range",summary.ranges||[])}</div>${activityDetailMarkup(entry.betting_activity)}</td></tr>`}).join("")+totalRow;updateHistorySortIndicators()}
@@ -255,6 +269,7 @@ document.getElementById("range-distribution").addEventListener("click",event=>{c
 document.getElementById("tournament-filter").addEventListener("change",event=>{selectedGrade=event.target.value;renderDisplays()});
 document.getElementById("status-filter").addEventListener("change",event=>{selectedStatus=event.target.value;renderDisplays()});
 document.querySelectorAll("[data-view]").forEach(button=>button.addEventListener("click",()=>{dataView=button.dataset.view;updateViewLabels();renderDisplays()}));
+document.querySelectorAll("[data-page-tab]").forEach(button=>button.addEventListener("click",()=>{const historical=button.dataset.pageTab==="historical";document.getElementById("main-panel").hidden=historical;document.getElementById("historical-panel").hidden=!historical;document.querySelectorAll("[data-page-tab]").forEach(tab=>tab.setAttribute("aria-pressed",String(tab===button)))}));
 document.querySelectorAll("[data-history-sort]").forEach(button=>button.addEventListener("click",()=>{if(historySortColumn===button.dataset.historySort)historySortDirection=historySortDirection==="ascending"?"descending":"ascending";else{historySortColumn=button.dataset.historySort;historySortDirection="ascending"}renderHistory()}));
 document.getElementById("history-rows").addEventListener("click",event=>{const button=event.target.closest("[data-history-expand]");if(!button)return;const refresh=Number(button.dataset.historyExpand);if(expandedHistory.has(refresh))expandedHistory.delete(refresh);else expandedHistory.add(refresh);renderHistory()});
 document.getElementById("reset-filters").addEventListener("click",resetFilters);
