@@ -179,12 +179,13 @@ Without the Worker URL configured, the button falls back to opening the Actions
 workflow page. No periodic scrape or automatic browser polling is configured,
 so data remains at the latest successful refresh until a user triggers another
 run.
-The collapsible **Performance History** section stores the last 100 successful
-refreshes in the published site. Each record retains its full matched-result
-snapshot and separate Matched Amount and Order Book Depth tournament and
-liquidity-range breakdowns, including platform leader percentages and match
-counts. History rows also show overall and per-grade average combined liquidity
-in USD for each view. Older snapshots are upgraded from their saved results
+The **Historical Data** tab contains the **Performance History** and
+**Betting Activity by Time Window** tables. Performance History stores the last
+100 successful refreshes in the published site. Each record retains its full
+matched-result snapshot and separate Matched Amount and Order Book Depth
+tournament and liquidity-range breakdowns, including platform leader
+percentages and match counts. History rows also show overall and per-grade
+average combined liquidity in USD for each view. Older snapshots are upgraded from their saved results
 when the next history record is published. Switch the active data view to
 inspect that view's history; sort by
 refresh number, timestamp, leader share, or match count, and expand a row to
@@ -193,9 +194,9 @@ matches led by that venue; ties remain in the denominator but count as a win
 for neither platform. A highlighted Total row reports the number of refreshes
 and the average platform leader shares and match count, plus match-weighted
 overall and per-grade liquidity averages for the active view.
-**Betting Activity by Grade** tracks positive increases in provider-reported
-matched volume between successive successful refreshes, grouped by competition
-grade and time remaining until scheduled start. The scheduled start time is the
+**Betting Activity by Time Window** tracks positive increases in
+provider-reported matched volume between successive successful refreshes,
+grouped by competition grade and time remaining until scheduled start. The scheduled start time is the
 classification source: the "In-Play" bucket means that scheduled start has
 passed, not that a live score/status was independently verified. This avoids
 assigning a future match to In-Play merely because one exchange reports a live
