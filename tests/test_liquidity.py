@@ -645,6 +645,7 @@ class LiquidityTests(unittest.TestCase):
             self.assertEqual(comparison["polymarket_depth"], "9.80")
             self.assertEqual(comparison["kalshi_depth"], "7.00")
             self.assertEqual(comparison["phase"], "in_play")
+            self.assertEqual(comparison["start_time"], start.isoformat())
             self.assertEqual(comparison["markets"]["polymarket"][0]["liquidity"], "9.80")
             self.assertEqual(comparison["markets"]["kalshi"][0]["liquidity"], "7.00")
             self.assertEqual(payload["distribution"], [{
@@ -738,6 +739,13 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn('label:"25k-100k"', HTML)
         self.assertIn('label:"100k+"', HTML)
         self.assertIn("renderRangeDistribution()", HTML)
+        self.assertIn("Betting Activity by Grade", HTML)
+        self.assertIn('ACTIVITY_BUCKETS=[{key:"before_24h"', HTML)
+        self.assertIn("function renderActivityHistory()", HTML)
+        self.assertIn("function activityDetailMarkup(activity)", HTML)
+        self.assertIn("function activityShares(buckets,total)", HTML)
+        self.assertIn("renderActivityHistory()", HTML)
+        self.assertIn(".activity-before_24h i{background:#2563eb}", HTML)
         self.assertIn("aria-pressed", HTML)
         self.assertIn(
             "Provider-reported matched volume; the total USD amount or contracts that have been matched on each platform.",
@@ -886,6 +894,50 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(len(bounded), HISTORY_LIMIT)
         self.assertEqual(bounded[-1]["refresh"], HISTORY_LIMIT + 1)
         self.assertEqual(bounded[0]["refresh"], 2)
+
+    def test_betting_activity_tracks_observed_volume_in_time_to_match_buckets(self):
+        observed = "2026-10-01T00:00:00+00:00"
+        cases = [
+            ("far", "2026-10-02T06:00:00+00:00", "pre_match", 100),
+            ("day", "2026-10-01T18:00:00+00:00", "pre_match", 200),
+            ("soon", "2026-10-01T08:00:00+00:00", "pre_match", 300),
+            ("near", "2026-10-01T01:00:00+00:00", "pre_match", 400),
+            ("live", "2026-09-30T23:00:00+00:00", "in_play", 500),
+        ]
+        baseline_results = [{
+            "id": match_id,
+            "grade": "atp",
+            "start_time": start_time,
+            "phase": phase,
+            "polymarket_volume": "10",
+            "kalshi_volume": "10",
+        } for match_id, start_time, phase, _ in cases]
+        activity_results = [{
+            **result,
+            "polymarket_volume": str(10 + increase),
+            "kalshi_volume": "10",
+        } for result, (_, _, _, increase) in zip(baseline_results, cases)]
+        first = append_history({"updated_at": observed, "results": baseline_results})
+        self.assertEqual(first[0]["betting_activity"]["total_volume"], 0)
+        second = append_history(
+            {
+                "updated_at": observed,
+                "results": activity_results,
+            },
+            first,
+        )
+        activity = second[-1]["betting_activity"]
+        self.assertEqual(activity["total_volume"], 1500)
+        self.assertEqual(
+            activity["grades"][0]["buckets"],
+            {
+                "before_24h": 100,
+                "before_24_12h": 200,
+                "before_12_2h": 300,
+                "before_2_0h": 400,
+                "in_play": 500,
+            },
+        )
 
     def test_ui_liquidity_distribution_counts_ties_in_denominator(self):
         from tennis_betting.ui import _liquidity_distribution

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -13,6 +14,13 @@ LIQUIDITY_BANDS = (
     ("5k-25k", Decimal("5000"), Decimal("25000")),
     ("25k-100k", Decimal("25000"), Decimal("100000")),
     ("100k+", Decimal("100000"), Decimal("Infinity")),
+)
+ACTIVITY_BUCKETS = (
+    ("before_24h", "24h+ Before"),
+    ("before_24_12h", "24-12h Before"),
+    ("before_12_2h", "12-2h Before"),
+    ("before_2_0h", "2-0h Before"),
+    ("in_play", "In-Play"),
 )
 
 
@@ -82,6 +90,92 @@ def _breakdown(results: list[dict[str, Any]], view: str) -> dict[str, list[dict[
     }
 
 
+def _activity_breakdown(
+    results: list[dict[str, Any]],
+    previous_results: list[dict[str, Any]],
+    observed_at: str | None,
+) -> dict[str, Any]:
+    """Record increases in matched volume between refreshes, classified by match time."""
+    activity: dict[str, dict[str, Decimal]] = {}
+    if not observed_at:
+        return {
+            "grades": [],
+            "bucket_totals": {key: 0 for key, _ in ACTIVITY_BUCKETS},
+            "total_volume": 0,
+        }
+    try:
+        observation_time = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+    except ValueError:
+        return {
+            "grades": [],
+            "bucket_totals": {key: 0 for key, _ in ACTIVITY_BUCKETS},
+            "total_volume": 0,
+        }
+
+    previous_by_id = {
+        str(result.get("id")): result
+        for result in previous_results
+        if result.get("id") is not None
+    }
+    for result in results:
+        result_id = result.get("id")
+        previous = previous_by_id.get(str(result_id)) if result_id is not None else None
+        if previous is None or not result.get("start_time"):
+            continue
+        try:
+            start_time = datetime.fromisoformat(
+                str(result["start_time"]).replace("Z", "+00:00")
+            )
+            if start_time.tzinfo is None:
+                start_time = start_time.replace(tzinfo=observation_time.tzinfo)
+        except ValueError:
+            continue
+        if result.get("phase") == "in_play" or start_time <= observation_time:
+            bucket = "in_play"
+        else:
+            hours_to_start = (
+                Decimal(str((start_time - observation_time).total_seconds()))
+                / Decimal(3600)
+            )
+            if hours_to_start >= 24:
+                bucket = "before_24h"
+            elif hours_to_start >= 12:
+                bucket = "before_24_12h"
+            elif hours_to_start >= 2:
+                bucket = "before_12_2h"
+            else:
+                bucket = "before_2_0h"
+        volume_increase = Decimal(0)
+        for venue in ("polymarket", "kalshi"):
+            current = Decimal(str(result.get(f"{venue}_volume", 0) or 0))
+            prior = Decimal(str(previous.get(f"{venue}_volume", 0) or 0))
+            volume_increase += max(current - prior, Decimal(0))
+        if volume_increase <= 0:
+            continue
+        grade = str(result.get("grade") or "unknown")
+        grade_activity = activity.setdefault(
+            grade, {key: Decimal(0) for key, _ in ACTIVITY_BUCKETS}
+        )
+        grade_activity[bucket] += volume_increase
+
+    bucket_totals = {
+        key: sum((values[key] for values in activity.values()), Decimal(0))
+        for key, _ in ACTIVITY_BUCKETS
+    }
+    return {
+        "grades": [
+            {
+                "label": grade,
+                "buckets": {key: float(amount) for key, amount in values.items()},
+                "total_volume": float(sum(values.values(), Decimal(0))),
+            }
+            for grade, values in sorted(activity.items())
+        ],
+        "bucket_totals": {key: float(amount) for key, amount in bucket_totals.items()},
+        "total_volume": float(sum(bucket_totals.values(), Decimal(0))),
+    }
+
+
 def _history_entry(data: dict[str, Any], refresh_number: int) -> dict[str, Any]:
     results = data.get("results")
     if not isinstance(results, list):
@@ -97,6 +191,9 @@ def _history_entry(data: dict[str, Any], refresh_number: int) -> dict[str, Any]:
         "timestamp": data.get("updated_at"),
         "results": results,
         "views": views,
+        "betting_activity": _activity_breakdown(
+            results, data.get("_previous_results", []), data.get("updated_at")
+        ),
     }
 
 
@@ -110,17 +207,30 @@ def append_history(
         for entry in entries
     ):
         raise ValueError("history entries must have an integer refresh number")
-    entries = [
-        _history_entry(
-            {"updated_at": entry.get("timestamp"), "results": entry["results"]},
-            entry["refresh"],
-        )
-        if isinstance(entry.get("results"), list)
-        else entry
-        for entry in entries
-    ]
+    upgraded_entries = []
+    previous_results: list[dict[str, Any]] = []
+    for entry in entries:
+        if isinstance(entry.get("results"), list):
+            upgraded = _history_entry(
+                {
+                    "updated_at": entry.get("timestamp"),
+                    "results": entry["results"],
+                    "_previous_results": previous_results,
+                },
+                entry["refresh"],
+            )
+            if "betting_activity" in entry:
+                upgraded["betting_activity"] = entry["betting_activity"]
+            upgraded_entries.append(upgraded)
+            previous_results = entry["results"]
+        else:
+            upgraded_entries.append(entry)
+    entries = upgraded_entries
     next_refresh = max((entry["refresh"] for entry in entries), default=0) + 1
-    entries.append(_history_entry(data, next_refresh))
+    entries.append(_history_entry({
+        **data,
+        "_previous_results": previous_results,
+    }, next_refresh))
     return entries[-HISTORY_LIMIT:]
 
 
