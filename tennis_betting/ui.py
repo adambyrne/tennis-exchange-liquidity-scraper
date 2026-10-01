@@ -178,7 +178,7 @@ tbody#rows>tr:not(.details-row):hover .expand-button{background:#dbe7ff}
 <p class="unit-note" id="range-unit-note">Ranges use the combined amount in the selected view.</p>
 </section></div>
 <section class="activity-card card" aria-labelledby="activity-heading"><h2 id="activity-heading">Betting Activity by Grade</h2>
-<p class="activity-note">Share of newly observed matched-volume increases in the retained refresh history, grouped by time to match. Changes are attributed to the time bucket at observation; the first observation of a match establishes its baseline and is not counted as activity. Matches without a scheduled start time are omitted.</p>
+<p class="activity-note">Share of newly observed matched-volume increases in the retained refresh history, grouped by scheduled start time at observation. "In-Play" means the scheduled start has passed; live match status is not independently verified. The first observation of a match is only a baseline, and matches without a scheduled start time are omitted.</p>
 <div class="activity-wrap"><table class="activity-table"><thead><tr id="activity-header"></tr></thead><tbody id="activity-rows"><tr><td colspan="7" class="history-empty">Refresh data again to begin measuring volume changes.</td></tr></tbody></table></div></section>
 <details class="history-card card"><summary>Performance History</summary>
 <div class="history-wrap"><table class="history-table"><thead><tr id="history-header"></tr></thead><tbody id="history-rows"><tr><td colspan="8" class="history-empty">No refresh history yet.</td></tr></tbody></table></div></details>

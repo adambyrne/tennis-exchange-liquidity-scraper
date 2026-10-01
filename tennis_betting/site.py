@@ -95,7 +95,7 @@ def _activity_breakdown(
     previous_results: list[dict[str, Any]],
     observed_at: str | None,
 ) -> dict[str, Any]:
-    """Record increases in matched volume between refreshes, classified by match time."""
+    """Record matched-volume increases, classified by scheduled start time."""
     activity: dict[str, dict[str, Decimal]] = {}
     if not observed_at:
         return {
@@ -130,7 +130,9 @@ def _activity_breakdown(
                 start_time = start_time.replace(tzinfo=observation_time.tzinfo)
         except ValueError:
             continue
-        if result.get("phase") == "in_play" or start_time <= observation_time:
+        if start_time <= observation_time:
+            # Provider phase may combine inconsistent venue states; scheduled
+            # start time is the stable boundary for all pre-match buckets.
             bucket = "in_play"
         else:
             hours_to_start = (
@@ -209,7 +211,7 @@ def append_history(
         raise ValueError("history entries must have an integer refresh number")
     upgraded_entries = []
     previous_results: list[dict[str, Any]] = []
-    for entry in entries:
+    for index, entry in enumerate(entries):
         if isinstance(entry.get("results"), list):
             upgraded = _history_entry(
                 {
@@ -219,7 +221,7 @@ def append_history(
                 },
                 entry["refresh"],
             )
-            if "betting_activity" in entry:
+            if index == 0 and "betting_activity" in entry:
                 upgraded["betting_activity"] = entry["betting_activity"]
             upgraded_entries.append(upgraded)
             previous_results = entry["results"]

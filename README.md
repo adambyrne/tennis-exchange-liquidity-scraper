@@ -195,8 +195,12 @@ and the average platform leader shares and match count, plus match-weighted
 overall and per-grade liquidity averages for the active view.
 **Betting Activity by Grade** tracks positive increases in provider-reported
 matched volume between successive successful refreshes, grouped by competition
-grade and time remaining until scheduled start (or in-play status). The first
-observation of each match establishes a baseline; it is not treated as new
+grade and time remaining until scheduled start. The scheduled start time is the
+classification source: the "In-Play" bucket means that scheduled start has
+passed, not that a live score/status was independently verified. This avoids
+assigning a future match to In-Play merely because one exchange reports a live
+phase inconsistent with the other exchange's schedule. The first observation
+of each match establishes a baseline; it is not treated as new
 activity because its cumulative volume may have accrued before tracking began.
 Each increment is assigned to the bucket at the later observation, so long gaps
 between refreshes can blur the exact timing of activity. Records without a

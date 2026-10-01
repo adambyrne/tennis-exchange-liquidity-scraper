@@ -899,9 +899,9 @@ class LiquidityTests(unittest.TestCase):
         observed = "2026-10-01T00:00:00+00:00"
         cases = [
             ("far", "2026-10-02T06:00:00+00:00", "pre_match", 100),
-            ("day", "2026-10-01T18:00:00+00:00", "pre_match", 200),
+            ("day", "2026-10-01T18:00:00+00:00", "in_play", 200),
             ("soon", "2026-10-01T08:00:00+00:00", "pre_match", 300),
-            ("near", "2026-10-01T01:00:00+00:00", "pre_match", 400),
+            ("near", "2026-10-01T01:00:00+00:00", "in_play", 400),
             ("live", "2026-09-30T23:00:00+00:00", "in_play", 500),
         ]
         baseline_results = [{
@@ -930,6 +930,46 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(activity["total_volume"], 1500)
         self.assertEqual(
             activity["grades"][0]["buckets"],
+            {
+                "before_24h": 100,
+                "before_24_12h": 200,
+                "before_12_2h": 300,
+                "before_2_0h": 400,
+                "in_play": 500,
+            },
+        )
+        stale_history = [
+            {
+                "refresh": 1,
+                "timestamp": observed,
+                "results": baseline_results,
+                "betting_activity": first[0]["betting_activity"],
+            },
+            {
+                "refresh": 2,
+                "timestamp": observed,
+                "results": activity_results,
+                "betting_activity": {
+                    "grades": [{
+                        "label": "atp",
+                        "buckets": {
+                            "before_24h": 0,
+                            "before_24_12h": 0,
+                            "before_12_2h": 0,
+                            "before_2_0h": 0,
+                            "in_play": 1500,
+                        },
+                        "total_volume": 1500,
+                    }],
+                },
+            },
+        ]
+        rebuilt = append_history(
+            {"updated_at": observed, "results": activity_results},
+            stale_history,
+        )
+        self.assertEqual(
+            rebuilt[1]["betting_activity"]["bucket_totals"],
             {
                 "before_24h": 100,
                 "before_24_12h": 200,
