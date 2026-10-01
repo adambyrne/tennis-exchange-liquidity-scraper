@@ -677,27 +677,37 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn("mini-bar", HTML)
         self.assertIn('tournamentRowMarkup("Total",total,true)', HTML)
         self.assertIn("Avg Staked (USD)", HTML)
-        self.assertIn('class="tie-column">Tie %', HTML)
-        self.assertIn('class="tie-column">${shareCell(shares.tie,"tie")}', HTML)
-        self.assertIn('if(!row.total)return {polymarket:0,kalshi:0,tie:0}', HTML)
-        self.assertIn('tie:100-polymarket-kalshi', HTML)
-        self.assertIn(".distribution th.tie-column,.distribution td.tie-column .share-cell{color:#64748b}", HTML)
-        self.assertIn(".mini-bar.tie i{background:linear-gradient(90deg,#cbd5e1,#64748b)}", HTML)
+        self.assertIn('class="zero-column">Zero Liquidity %', HTML)
+        self.assertIn('class="zero-column">${shareCell(shares.zero,"zero")}', HTML)
+        self.assertIn('if(!row.total)return {polymarket:0,kalshi:0,zero:0}', HTML)
+        self.assertIn('return {polymarket:rounded[0],kalshi:rounded[1],zero:rounded[2]}', HTML)
+        self.assertIn(".distribution th.zero-column,.distribution td.zero-column .share-cell{color:#64748b}", HTML)
+        self.assertIn(".mini-bar.zero i{background:linear-gradient(90deg,#cbd5e1,#64748b)}", HTML)
+        self.assertIn('function recordLiquidityLeader(row,result)', HTML)
+        self.assertIn('if(polymarket<=0||kalshi<=0){row.zero++;return}', HTML)
+        self.assertIn('if(polymarket===kalshi){row.pm+=0.5;row.kalshi+=0.5}', HTML)
         self.assertIn(".tournament-distribution{overflow-x:hidden}", HTML)
         self.assertIn(".tournament-distribution table{table-layout:fixed;min-width:0}", HTML)
         self.assertIn('<section class="distribution tournament-distribution"', HTML)
         self.assertIn('<td colspan="6">No matched data</td>', HTML)
         self.assertIn('<td colspan="5">No matched data</td>', HTML)
-        self.assertIn('shareCell(shares.tie,"tie")', HTML)
-        self.assertIn('<th class="tie-column">Tie %</th>', HTML)
+        self.assertIn('shareCell(shares.zero,"zero")', HTML)
+        self.assertIn('<th class="zero-column">Zero Liquidity %</th>', HTML)
         self.assertIn('const shares=summaryShares(stats)', HTML)
+        self.assertIn('data-history-sort="refresh"', HTML)
+        self.assertIn('function historyHeaderMarkup(grades)', HTML)
+        self.assertIn('gradeSummary=gradeRows.get(grade),value=gradeSummary?.average_liquidity', HTML)
+        self.assertIn('function weightedAverageLiquidity(rows,grade=null)', HTML)
+        self.assertIn('Number(summary.total_matches)>0&&summary.average_liquidity!==undefined?usd(summary.average_liquidity)', HTML)
+        self.assertIn('Average Liquidity (USD)', HTML)
+        self.assertIn('historyHeaderMarkup(grades)', HTML)
         self.assertIn('row.combined/row.total', HTML)
         self.assertIn('style:"currency",currency:"USD"', HTML)
         self.assertIn('row.combined+=amountFor(result,"polymarket")+amountFor(result,"kalshi")', HTML)
         self.assertIn("function rangeBreakdownMarkup(row,index)", HTML)
         self.assertIn('data-range-expand="${esc(row.label)}"', HTML)
         self.assertIn('button=!totalRow&&row.total?', HTML)
-        self.assertIn('row.grades.set(grade,{total:0,pm:0,kalshi:0})', HTML)
+        self.assertIn('row.grades.set(grade,{total:0,pm:0,kalshi:0,zero:0})', HTML)
         self.assertIn('data-range-expand', HTML)
         self.assertIn('expandedRanges=new Set()', HTML)
         self.assertIn('document.getElementById("range-distribution").addEventListener("click"', HTML)
@@ -756,7 +766,7 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn('data-history-expand="${entry.refresh}"', HTML)
         self.assertIn('function renderHistory()', HTML)
         self.assertIn('class="history-total-row"', HTML)
-        self.assertIn('const snapshots=rows.map(entry=>entry.views[view])', HTML)
+        self.assertIn('const average=key=>rows.reduce((sum,entry)=>sum+Number(entry.views[view][key]||0),0)/rows.length', HTML)
         self.assertIn('average("polymarket_percent")', HTML)
         self.assertIn('average("kalshi_percent")', HTML)
         self.assertIn('average("total_matches")', HTML)
@@ -832,6 +842,8 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(entry["views"]["depth"]["kalshi_percent"], 50)
         self.assertEqual(entry["views"]["matched"]["total_matches"], 2)
         self.assertEqual(entry["views"]["depth"]["total_matches"], 2)
+        self.assertEqual(entry["views"]["matched"]["average_liquidity"], 7000)
+        self.assertEqual(entry["views"]["depth"]["average_liquidity"], 8000)
         self.assertEqual(
             {row["label"] for row in entry["views"]["matched"]["tournaments"]},
             {"atp", "wta"},
@@ -842,6 +854,15 @@ class LiquidityTests(unittest.TestCase):
         }
         self.assertEqual(tournament_shares["atp"], (100, 0))
         self.assertEqual(tournament_shares["wta"], (0, 100))
+        tournament_averages = {
+            row["label"]: row["average_liquidity"]
+            for row in entry["views"]["matched"]["tournaments"]
+        }
+        self.assertEqual(tournament_averages, {"atp": 10000, "wta": 4000})
+        self.assertEqual(
+            {row["label"]: row["average_liquidity"] for row in entry["views"]["depth"]["tournaments"]},
+            {"atp": 6000, "wta": 10000},
+        )
         self.assertEqual(
             {row["label"] for row in entry["views"]["matched"]["ranges"]},
             {"<5k", "5k-25k", "25k-100k", "100k+"},
@@ -854,6 +875,11 @@ class LiquidityTests(unittest.TestCase):
             [row["total_matches"] for row in entry["views"]["depth"]["ranges"]],
             [0, 2, 0, 0],
         )
+        migrated = append_history(
+            data,
+            [{"refresh": 4, "timestamp": data["updated_at"], "results": data["results"]}],
+        )
+        self.assertEqual(migrated[0]["views"]["matched"]["average_liquidity"], 7000)
         bounded = append_history(
             data, [{"refresh": refresh} for refresh in range(1, HISTORY_LIMIT + 1)]
         )

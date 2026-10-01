@@ -120,10 +120,12 @@ and match status (pre-match, in-play, or both); both summary tables and the
 results update together. The tournament summary shows leader percentages by
 type and an aggregate total. The liquidity-range summary groups matches by combined
 amount in the active view (<5k, 5k-25k, 25k-100k, and 100k+) and shows counts
-and leader percentages. Expand a liquidity range to see its grade-level match
-counts and platform leader percentages. The tournament summary includes the
-average combined Polymarket and Kalshi amount per match, formatted in USD,
-with the Total row calculated across all filtered matches. Expanded market
+and leader percentages. Zero Liquidity % counts matches where either platform
+has no liquidity; positive-liquidity ties are split evenly between platform
+shares. Expand a liquidity range to see its grade-level match counts and
+platform percentages. The tournament summary includes the average combined
+Polymarket and Kalshi amount per match, formatted in USD, with the Total row
+calculated across all filtered matches. Expanded market
 rows also switch between matched
 market amounts and order-book depth; Polymarket matched volume is the market
 total shared across its outcome tokens. Older snapshots without per-market
@@ -181,12 +183,16 @@ The collapsible **Performance History** section stores the last 100 successful
 refreshes in the published site. Each record retains its full matched-result
 snapshot and separate Matched Amount and Order Book Depth tournament and
 liquidity-range breakdowns, including platform leader percentages and match
-counts. Switch the active data view to inspect that view's history; sort by
+counts. History rows also show overall and per-grade average combined liquidity
+in USD for each view. Older snapshots are upgraded from their saved results
+when the next history record is published. Switch the active data view to
+inspect that view's history; sort by
 refresh number, timestamp, leader share, or match count, and expand a row to
 review its tournament and range details. Platform percentages are the share of
 matches led by that venue; ties remain in the denominator but count as a win
 for neither platform. A highlighted Total row reports the number of refreshes
-and the average platform leader shares and match count for the active view.
+and the average platform leader shares and match count, plus match-weighted
+overall and per-grade liquidity averages for the active view.
 Pushes that change the workflow or scraper code also run the publishing
 workflow. GitHub Pages is enabled by the workflow when repository policy
 permits; if Pages is restricted, an administrator must allow Pages
