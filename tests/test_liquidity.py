@@ -745,6 +745,16 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn('<div id="historical-panel" class="page-panel" hidden>', HTML)
         self.assertIn('id="activity-heading">Betting Activity by Time Window</h2>', HTML)
         self.assertIn('id="history-heading">Performance History</h2>', HTML)
+        self.assertIn('id="liquidity-range-heading">Historical Liquidity Range</h2>', HTML)
+        self.assertIn('id="liquidity-range-rows"', HTML)
+        self.assertIn("function renderLiquidityRangeHistory()", HTML)
+        self.assertIn("function aggregateLiquidityRanges(entries,view)", HTML)
+        self.assertIn('data-liquidity-history-sort="timestamp"', HTML)
+        self.assertIn('data-liquidity-history-sort="matches"', HTML)
+        self.assertIn('data-liquidity-range-expand="total"', HTML)
+        self.assertIn('class="zero-history">Zero Liquidity %', HTML)
+        self.assertIn('getElementById("liquidity-range-header").addEventListener("click"', HTML)
+        self.assertIn('renderLiquidityRangeHistory()', HTML)
         self.assertIn('HISTORY_GRADE_ORDER=["grand_slam","atp","wta","itf"]', HTML)
         self.assertIn('HISTORY_EXCLUDED_GRADES=["atp_challenger","utr","unknown"]', HTML)
         self.assertIn('.filter(grade=>!HISTORY_EXCLUDED_GRADES.includes(grade))', HTML)
@@ -821,6 +831,8 @@ class LiquidityTests(unittest.TestCase):
             self.assertEqual(len(history), 1)
             self.assertEqual(history[0]["refresh"], 1)
             self.assertEqual(history[0]["results"], payload["results"])
+            self.assertIn("liquidity_ranges", history[0]["views"]["matched"])
+            self.assertIn("liquidity_ranges", history[0]["views"]["depth"])
             build_static_site(payload, directory, refresh_api_url="https://refresh.example.workers.dev/")
             self.assertIn(
                 'const REFRESH_API_BASE = "https://refresh.example.workers.dev";',
@@ -892,17 +904,63 @@ class LiquidityTests(unittest.TestCase):
             [row["total_matches"] for row in entry["views"]["depth"]["ranges"]],
             [0, 2, 0, 0],
         )
+        self.assertEqual(
+            [
+                (row["label"], row["total_matches"], row["polymarket_percent"],
+                 row["kalshi_percent"], row["zero_liquidity_percent"])
+                for row in entry["views"]["matched"]["liquidity_ranges"]
+            ],
+            [
+                ("<5k", 1, 0, 100, 0),
+                ("5k-25k", 1, 100, 0, 0),
+                ("25k-100k", 0, 0, 0, 0),
+                ("100k+", 0, 0, 0, 0),
+            ],
+        )
         migrated = append_history(
             data,
             [{"refresh": 4, "timestamp": data["updated_at"], "results": data["results"]}],
         )
         self.assertEqual(migrated[0]["views"]["matched"]["average_liquidity"], 7000)
+        self.assertEqual(
+            migrated[0]["views"]["matched"]["liquidity_ranges"],
+            entry["views"]["matched"]["liquidity_ranges"],
+        )
         bounded = append_history(
             data, [{"refresh": refresh} for refresh in range(1, HISTORY_LIMIT + 1)]
         )
         self.assertEqual(len(bounded), HISTORY_LIMIT)
         self.assertEqual(bounded[-1]["refresh"], HISTORY_LIMIT + 1)
         self.assertEqual(bounded[0]["refresh"], 2)
+
+    def test_historical_liquidity_ranges_split_ties_and_track_zero_liquidity(self):
+        data = {
+            "updated_at": "2026-10-02T10:00:00+00:00",
+            "results": [
+                {"polymarket_volume": 2000, "kalshi_volume": 0},
+                {"polymarket_volume": 2500, "kalshi_volume": 2500},
+                {"polymarket_volume": 0, "kalshi_volume": 120000},
+            ],
+        }
+        ranges = append_history(data)[0]["views"]["matched"]["liquidity_ranges"]
+        self.assertEqual(
+            [
+                (
+                    row["label"],
+                    row["total_matches"],
+                    row["polymarket_percent"],
+                    row["kalshi_percent"],
+                    row["zero_liquidity_percent"],
+                )
+                for row in ranges
+            ],
+            [
+                ("<5k", 1, 0, 0, 100),
+                ("5k-25k", 1, 50, 50, 0),
+                ("25k-100k", 0, 0, 0, 0),
+                ("100k+", 1, 0, 0, 100),
+            ],
+        )
 
     def test_betting_activity_tracks_observed_volume_in_time_to_match_buckets(self):
         observed = "2026-10-01T00:00:00+00:00"
