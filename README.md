@@ -194,6 +194,13 @@ matches led by that venue; ties remain in the denominator but count as a win
 for neither platform. A highlighted Total row reports the number of refreshes
 and the average platform leader shares and match count, plus match-weighted
 overall and per-grade liquidity averages for the active view.
+The **Historical Liquidity Range** table records each refresh's match counts
+and Polymarket, Kalshi, and zero-liquidity shares across the four liquidity
+ranges. Expand a refresh or the Total row to inspect its range breakdown;
+the Total pools match snapshots across retained refreshes. Matches with zero
+liquidity on either platform count as zero-liquidity, while positive ties are
+split evenly between Polymarket and Kalshi. The table follows the active
+Matched Amount or Order Book Depth view.
 **Betting Activity by Time Window** tracks positive increases in
 provider-reported matched volume between successive successful refreshes,
 grouped by competition grade and time remaining until scheduled start. The scheduled start time is the

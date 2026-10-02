@@ -87,7 +87,63 @@ def _breakdown(results: list[dict[str, Any]], view: str) -> dict[str, list[dict[
     return {
         "tournaments": rows(tournaments),
         "ranges": rows(ranges, (label for label, _, _ in LIQUIDITY_BANDS)),
+        "liquidity_ranges": _liquidity_range_breakdown(results, view),
     }
+
+
+def _liquidity_range_breakdown(
+    results: list[dict[str, Any]], view: str
+) -> list[dict[str, Any]]:
+    ranges: dict[str, dict[str, Any]] = {
+        label: {"total_matches": 0, "polymarket": 0, "kalshi": 0, "zero": 0}
+        for label, _, _ in LIQUIDITY_BANDS
+    }
+    for result in results:
+        if view == "matched":
+            polymarket = Decimal(str(result.get("polymarket_volume", 0) or 0))
+            kalshi = Decimal(str(result.get("kalshi_volume", 0) or 0))
+        else:
+            polymarket = Decimal(str(result.get("polymarket_depth", 0) or 0))
+            kalshi = Decimal(str(result.get("kalshi_depth", 0) or 0))
+        combined = polymarket + kalshi
+        label = next(
+            (
+                label
+                for label, lower, upper in LIQUIDITY_BANDS
+                if lower <= combined < upper
+            ),
+            None,
+        )
+        if label is None:
+            continue
+        row = ranges[label]
+        row["total_matches"] += 1
+        if polymarket <= 0 or kalshi <= 0:
+            row["zero"] += 1
+        elif polymarket == kalshi:
+            row["polymarket"] += Decimal("0.5")
+            row["kalshi"] += Decimal("0.5")
+        elif polymarket > kalshi:
+            row["polymarket"] += 1
+        else:
+            row["kalshi"] += 1
+
+    return [
+        {
+            "label": label,
+            "total_matches": row["total_matches"],
+            "polymarket_percent": float(row["polymarket"] / row["total_matches"] * 100)
+            if row["total_matches"]
+            else 0,
+            "kalshi_percent": float(row["kalshi"] / row["total_matches"] * 100)
+            if row["total_matches"]
+            else 0,
+            "zero_liquidity_percent": float(row["zero"] / row["total_matches"] * 100)
+            if row["total_matches"]
+            else 0,
+        }
+        for label, row in ranges.items()
+    ]
 
 
 def _activity_breakdown(
