@@ -747,6 +747,13 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn('id="history-heading">Performance History</h2>', HTML)
         self.assertIn('id="liquidity-range-heading">Historical Liquidity Range</h2>', HTML)
         self.assertIn('id="liquidity-range-rows"', HTML)
+        self.assertIn('id="grade-liquidity-heading">Historical Grade Liquidity Comparison</h2>', HTML)
+        self.assertIn('id="grade-liquidity-rows"', HTML)
+        self.assertIn('data-grade-liquidity-sort="difference"', HTML)
+        self.assertIn('function renderGradeLiquidityHistory()', HTML)
+        self.assertIn('function gradeLiquidityRowsFor(entry,view)', HTML)
+        self.assertIn('renderGradeLiquidityHistory()', HTML)
+        self.assertIn('getElementById("grade-liquidity-header").addEventListener("click"', HTML)
         self.assertIn("function renderLiquidityRangeHistory()", HTML)
         self.assertIn("function aggregateLiquidityRanges(entries,view)", HTML)
         self.assertIn('data-liquidity-history-sort="timestamp"', HTML)
@@ -891,6 +898,26 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(
             {row["label"]: row["average_liquidity"] for row in entry["views"]["depth"]["tournaments"]},
             {"atp": 6000, "wta": 10000},
+        )
+        self.assertEqual(
+            {
+                row["label"]: (
+                    row["polymarket_average_liquidity"],
+                    row["kalshi_average_liquidity"],
+                )
+                for row in entry["views"]["matched"]["tournaments"]
+            },
+            {"atp": (6000, 4000), "wta": (1000, 3000)},
+        )
+        self.assertEqual(
+            {
+                row["label"]: (
+                    row["polymarket_average_liquidity"],
+                    row["kalshi_average_liquidity"],
+                )
+                for row in entry["views"]["depth"]["tournaments"]
+            },
+            {"atp": (2000, 4000), "wta": (9000, 1000)},
         )
         self.assertEqual(
             {row["label"] for row in entry["views"]["matched"]["ranges"]},

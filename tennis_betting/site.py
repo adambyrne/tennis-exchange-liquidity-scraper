@@ -28,6 +28,8 @@ def _leader_percentages(results: list[dict[str, Any]], view: str) -> dict[str, A
     total = len(results)
     polymarket_wins = 0
     kalshi_wins = 0
+    polymarket_liquidity = Decimal(0)
+    kalshi_liquidity = Decimal(0)
     combined_liquidity = Decimal(0)
     for result in results:
         if view == "matched":
@@ -38,11 +40,19 @@ def _leader_percentages(results: list[dict[str, Any]], view: str) -> dict[str, A
             kalshi = Decimal(str(result.get("kalshi_depth", 0) or 0))
         polymarket_wins += polymarket > kalshi
         kalshi_wins += kalshi > polymarket
+        polymarket_liquidity += polymarket
+        kalshi_liquidity += kalshi
         combined_liquidity += polymarket + kalshi
     return {
         "total_matches": total,
         "polymarket_percent": (polymarket_wins / total * 100) if total else 0,
         "kalshi_percent": (kalshi_wins / total * 100) if total else 0,
+        "polymarket_average_liquidity": (
+            float(polymarket_liquidity / total) if total else 0
+        ),
+        "kalshi_average_liquidity": (
+            float(kalshi_liquidity / total) if total else 0
+        ),
         "average_liquidity": (
             float(combined_liquidity / total) if total else 0
         ),
