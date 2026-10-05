@@ -201,12 +201,14 @@ the Total pools match snapshots across retained refreshes. Matches with zero
 liquidity on either platform count as zero-liquidity, while positive ties are
 split evenly between Polymarket and Kalshi. The table follows the active
 Matched Amount or Order Book Depth view.
-The **Historical Grade Liquidity Comparison** table reports per-refresh
-average Polymarket and Kalshi liquidity for each competition grade, along
-with their difference and leader. It follows the selected Matched Amount or
-Order Book Depth view; its Total row is match-weighted across all grade and
-refresh observations. Grade averages are derived from the saved result
-snapshots so the history can be rebuilt when the dashboard is published.
+The **Historical Grade Liquidity Comparison** table shows one row per refresh
+and a pair of Polymarket/Kalshi average-liquidity columns for each grade, with
+an additional all-grades pair. Blue/orange values and comparison bars show the
+platform amounts; a triangle marks the higher value. It follows the selected
+Matched Amount or Order Book Depth view, can be sorted by refresh number or
+timestamp, and its Total row is match-weighted across all grade and refresh
+observations. Grade averages are derived from saved result snapshots so the
+history can be rebuilt when the dashboard is published.
 **Betting Activity by Time Window** tracks positive increases in
 provider-reported matched volume between successive successful refreshes,
 grouped by competition grade and time remaining until scheduled start. The scheduled start time is the
