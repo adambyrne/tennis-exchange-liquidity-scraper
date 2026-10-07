@@ -244,6 +244,7 @@ class LiquidityTests(unittest.TestCase):
             ("M25 Sharm ElSheikh: Player A vs Player B", "ITF", CompetitionGrade.ITF),
             ("Korea Open: Player A vs Player B", "WTA Tour", CompetitionGrade.WTA),
             ("Chengdu Open: Player A vs Player B", "ATP Tour", CompetitionGrade.ATP),
+            ("ATP Match: Player A vs Player B", "ATP Challenger", CompetitionGrade.ATP_CHALLENGER),
         )
         for event_title, sport_name, expected_grade in cases:
             with self.subTest(event_title=event_title):
@@ -443,8 +444,8 @@ class LiquidityTests(unittest.TestCase):
         def get_json(path, params=None):
             if path == "series":
                 return {"series": [
-                    {"ticker": "KXATPCHALLENGERMATCH", "title": "Challenger ATP", "tags": ["Tennis"]},
-                    {"ticker": "KXATPCHALLENGERDOUBLES", "title": "ATP Challenger Doubles Match",
+                    {"ticker": "KXATPCHALLENGERMATCH", "title": "ATP Match", "tags": ["Tennis"]},
+                    {"ticker": "KXATPCHALLENGERDOUBLES", "title": "ATP Doubles Match",
                      "tags": ["Tennis"]},
                     {"ticker": "KXATPSETMATCH", "title": "ATP Set Winner", "tags": ["Tennis"]},
                 ]}
@@ -622,6 +623,8 @@ class LiquidityTests(unittest.TestCase):
             "competitors": ["Player Two", "Player One"], "start_time": start,
             "matched_volume": "42",
         }, "kalshi", start)
+        polymarket = replace(polymarket, grade=CompetitionGrade.ATP)
+        kalshi = replace(kalshi, grade=CompetitionGrade.ATP_CHALLENGER)
         polymarket = replace(polymarket, raw={"order_books": [{
             "bids": [{"price": "0.50", "size": "10"}],
             "asks": [{"price": "0.60", "size": "8"}],
@@ -640,6 +643,7 @@ class LiquidityTests(unittest.TestCase):
             self.assertEqual(payload["results"][0]["volume_leader"], "Polymarket")
             comparison = payload["results"][0]
             self.assertEqual(comparison["id"], "pm-event|k-event")
+            self.assertEqual(comparison["grade"], CompetitionGrade.ATP_CHALLENGER.value)
             self.assertEqual(comparison["polymarket_volume"], "130")
             self.assertEqual(comparison["kalshi_volume"], "42")
             self.assertEqual(comparison["polymarket_depth"], "9.80")
@@ -649,7 +653,7 @@ class LiquidityTests(unittest.TestCase):
             self.assertEqual(comparison["markets"]["polymarket"][0]["liquidity"], "9.80")
             self.assertEqual(comparison["markets"]["kalshi"][0]["liquidity"], "7.00")
             self.assertEqual(payload["distribution"], [{
-                "tournament_type": "unknown",
+                "tournament_type": CompetitionGrade.ATP_CHALLENGER.value,
                 "polymarket_percent": "100%",
                 "kalshi_percent": "0%",
                 "total_matches": 1,
@@ -770,8 +774,8 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn('class="zero-history">Zero Liquidity %', HTML)
         self.assertIn('getElementById("liquidity-range-header").addEventListener("click"', HTML)
         self.assertIn('renderLiquidityRangeHistory()', HTML)
-        self.assertIn('HISTORY_GRADE_ORDER=["grand_slam","atp","wta","itf"]', HTML)
-        self.assertIn('HISTORY_EXCLUDED_GRADES=["atp_challenger","utr","unknown"]', HTML)
+        self.assertIn('HISTORY_GRADE_ORDER=["grand_slam","atp","atp_challenger","wta","itf"]', HTML)
+        self.assertIn('HISTORY_EXCLUDED_GRADES=["utr","unknown"]', HTML)
         self.assertIn('.filter(grade=>!HISTORY_EXCLUDED_GRADES.includes(grade))', HTML)
         self.assertIn('document.querySelectorAll("[data-page-tab]")', HTML)
         self.assertIn('ACTIVITY_BUCKETS=[{key:"before_24h"', HTML)

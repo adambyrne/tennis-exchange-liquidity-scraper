@@ -201,6 +201,14 @@ the Total pools match snapshots across retained refreshes. Matches with zero
 liquidity on either platform count as zero-liquidity, while positive ties are
 split evenly between Polymarket and Kalshi. The table follows the active
 Matched Amount or Order Book Depth view.
+ATP Tour and ATP Challenger are classified separately using event titles,
+provider sport/series metadata, and (for Kalshi) series identifiers. When the
+two providers disagree between generic ATP and ATP Challenger for a matched
+event, the more-specific Challenger classification is used. The distinction
+flows through filters, summaries, match badges, activity, and historical grade
+tables. Existing retained snapshots that only recorded generic ATP cannot be
+reclassified safely and remain unchanged; new snapshots carry the split.
+
 The **Historical Grade Liquidity Comparison** table shows one row per refresh
 and a pair of Polymarket/Kalshi average-liquidity columns for each grade, with
 an additional all-grades pair. Blue/orange values and comparison bars show the
