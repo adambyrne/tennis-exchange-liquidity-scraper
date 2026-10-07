@@ -817,6 +817,7 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn('<h2 class="history-title" id="history-heading">Performance History</h2>', HTML)
         self.assertIn('id="history-rows"', HTML)
         self.assertIn('data-history-sort="timestamp"', HTML)
+        self.assertIn('data-history-sort="total_matches">Total Matches <span class="history-sort-indicator"></span>', HTML)
         self.assertIn('data-history-expand="${entry.refresh}"', HTML)
         self.assertIn('function renderHistory()', HTML)
         self.assertIn('class="history-total-row"', HTML)
