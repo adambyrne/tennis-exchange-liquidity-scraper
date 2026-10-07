@@ -24,6 +24,16 @@ ACTIVITY_BUCKETS = (
 )
 
 
+def _median(values: list[Decimal]) -> float:
+    if not values:
+        return 0
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return float(ordered[middle])
+    return float((ordered[middle - 1] + ordered[middle]) / 2)
+
+
 def _leader_percentages(results: list[dict[str, Any]], view: str) -> dict[str, Any]:
     total = len(results)
     polymarket_wins = 0
@@ -31,6 +41,9 @@ def _leader_percentages(results: list[dict[str, Any]], view: str) -> dict[str, A
     polymarket_liquidity = Decimal(0)
     kalshi_liquidity = Decimal(0)
     combined_liquidity = Decimal(0)
+    polymarket_values = []
+    kalshi_values = []
+    combined_values = []
     for result in results:
         if view == "matched":
             polymarket = Decimal(str(result.get("polymarket_volume", 0) or 0))
@@ -43,6 +56,9 @@ def _leader_percentages(results: list[dict[str, Any]], view: str) -> dict[str, A
         polymarket_liquidity += polymarket
         kalshi_liquidity += kalshi
         combined_liquidity += polymarket + kalshi
+        polymarket_values.append(polymarket)
+        kalshi_values.append(kalshi)
+        combined_values.append(polymarket + kalshi)
     return {
         "total_matches": total,
         "polymarket_percent": (polymarket_wins / total * 100) if total else 0,
@@ -56,6 +72,9 @@ def _leader_percentages(results: list[dict[str, Any]], view: str) -> dict[str, A
         "average_liquidity": (
             float(combined_liquidity / total) if total else 0
         ),
+        "polymarket_median_liquidity": _median(polymarket_values),
+        "kalshi_median_liquidity": _median(kalshi_values),
+        "median_liquidity": _median(combined_values),
     }
 
 

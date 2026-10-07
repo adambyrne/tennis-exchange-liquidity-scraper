@@ -24,7 +24,9 @@ from tennis_betting.scraper import collect_once
 from tennis_betting.storage import (
     connect_database, export_liquidity_csv, save_snapshots,
 )
-from tennis_betting.site import HISTORY_LIMIT, append_history, build_static_site
+from tennis_betting.site import (
+    HISTORY_LIMIT, _leader_percentages, append_history, build_static_site,
+)
 from tennis_betting.ui import HTML, LiquidityUI
 
 
@@ -681,7 +683,7 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn("marketPanel(\"Kalshi\"", HTML)
         self.assertIn("mini-bar", HTML)
         self.assertIn('tournamentRowMarkup("Total",total,true)', HTML)
-        self.assertIn("Avg Staked (USD)", HTML)
+        self.assertIn('id="staked-heading">Avg Staked (USD)', HTML)
         self.assertIn('class="zero-column">Zero Liquidity %', HTML)
         self.assertIn('class="zero-column">${shareCell(shares.zero,"zero")}', HTML)
         self.assertIn('if(!row.total)return {polymarket:0,kalshi:0,zero:0}', HTML)
@@ -701,14 +703,18 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn('const shares=summaryShares(stats)', HTML)
         self.assertIn('data-history-sort="refresh"', HTML)
         self.assertIn('function historyHeaderMarkup(grades)', HTML)
-        self.assertIn('gradeSummary=gradeRows.get(grade),value=gradeSummary?.average_liquidity', HTML)
+        self.assertIn('gradeSummary?historicalLiquidity(entry,view,gradeSummary,"grade"):null', HTML)
         self.assertIn('function weightedAverageLiquidity(rows,grade=null)', HTML)
-        self.assertIn('Number(summary.total_matches)>0&&summary.average_liquidity!==undefined?usd(summary.average_liquidity)', HTML)
-        self.assertIn('Average Liquidity (USD)', HTML)
+        self.assertIn('function historicalLiquidity(entry,view,row=null,groupType="all")', HTML)
+        self.assertIn('function statistic(values)', HTML)
+        self.assertIn('<th>${statisticLabel()} Liquidity (USD)</th>', HTML)
         self.assertIn('historyHeaderMarkup(grades)', HTML)
-        self.assertIn('row.combined/row.total', HTML)
+        self.assertIn('data-statistic="average"', HTML)
+        self.assertIn('data-statistic="median"', HTML)
+        self.assertIn('localStorage.setItem("tennis-liquidity-statistic",statisticMode)', HTML)
+        self.assertIn('row.combinedValues.push(amountFor(result,"polymarket")+amountFor(result,"kalshi"))', HTML)
+        self.assertIn('data-statistic', HTML)
         self.assertIn('style:"currency",currency:"USD"', HTML)
-        self.assertIn('row.combined+=amountFor(result,"polymarket")+amountFor(result,"kalshi")', HTML)
         self.assertIn("function rangeBreakdownMarkup(row,index)", HTML)
         self.assertIn('data-range-expand="${esc(row.label)}"', HTML)
         self.assertIn('button=!totalRow&&row.total?', HTML)
@@ -755,15 +761,17 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn('id="grade-liquidity-rows"', HTML)
         self.assertIn('data-grade-liquidity-sort="refresh"', HTML)
         self.assertIn('data-grade-liquidity-sort="timestamp"', HTML)
-        self.assertIn('colspan="2">All Grades Average</th>', HTML)
+        self.assertIn('colspan="2">All Grades ${statisticLabel()}</th>', HTML)
         self.assertIn('grade-pair" colspan="2">${esc(gradeLabel(grade))}', HTML)
         self.assertIn('<thead id="grade-liquidity-header"></thead>', HTML)
-        self.assertIn('grades.map(()=>\'<th class="pm-subheading">Polymarket (USD)</th>', HTML)
+        self.assertIn('grades.map(()=>`<th class="pm-subheading">Polymarket ${statisticLabel()} (USD)</th>', HTML)
         self.assertIn('function gradeLiquidityValueCell(value,opponent,side)', HTML)
         self.assertIn('class="grade-liquidity-bar ${side}', HTML)
         self.assertIn('function renderGradeLiquidityHistory()', HTML)
         self.assertIn('function gradeLiquidityRowsFor(entry,view)', HTML)
-        self.assertIn('function averageGradeLiquidity(rows,key)', HTML)
+        self.assertIn('function aggregateGradeLiquidity(rows,key)', HTML)
+        self.assertIn('function gradeLiquidityHeader(grades)', HTML)
+        self.assertIn('statisticLabel()}</th>${grades.map', HTML)
         self.assertIn('renderGradeLiquidityHistory()', HTML)
         self.assertIn('getElementById("grade-liquidity-header").addEventListener("click"', HTML)
         self.assertIn("function renderLiquidityRangeHistory()", HTML)
@@ -812,10 +820,10 @@ class LiquidityTests(unittest.TestCase):
         self.assertIn('data-history-expand="${entry.refresh}"', HTML)
         self.assertIn('function renderHistory()', HTML)
         self.assertIn('class="history-total-row"', HTML)
-        self.assertIn('const average=key=>rows.reduce((sum,entry)=>sum+Number(entry.views[view][key]||0),0)/rows.length', HTML)
-        self.assertIn('average("polymarket_percent")', HTML)
-        self.assertIn('average("kalshi_percent")', HTML)
-        self.assertIn('average("total_matches")', HTML)
+        self.assertIn('const aggregate=key=>statistic(rows.map(entry=>entry.views[view][key]||0))', HTML)
+        self.assertIn('aggregate("polymarket_percent")', HTML)
+        self.assertIn('aggregate("kalshi_percent")', HTML)
+        self.assertIn('aggregate("total_matches")', HTML)
         self.assertIn('view=dataView==="matched"?"matched":"depth"', HTML)
         self.assertIn('fetch("./history.json?ts="+Date.now()', HTML)
         worker_path = Path(__file__).resolve().parents[1] / "refresh_worker" / "src" / "index.js"
@@ -892,6 +900,7 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(entry["views"]["depth"]["total_matches"], 2)
         self.assertEqual(entry["views"]["matched"]["average_liquidity"], 7000)
         self.assertEqual(entry["views"]["depth"]["average_liquidity"], 8000)
+        self.assertEqual(entry["views"]["matched"]["median_liquidity"], 7000)
         self.assertEqual(
             {row["label"] for row in entry["views"]["matched"]["tournaments"]},
             {"atp", "wta"},
@@ -971,6 +980,16 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(len(bounded), HISTORY_LIMIT)
         self.assertEqual(bounded[-1]["refresh"], HISTORY_LIMIT + 1)
         self.assertEqual(bounded[0]["refresh"], 2)
+
+    def test_median_liquidity_differs_from_mean_for_skewed_values(self):
+        summary = _leader_percentages([
+            {"polymarket_volume": "1", "kalshi_volume": "0"},
+            {"polymarket_volume": "2", "kalshi_volume": "0"},
+            {"polymarket_volume": "100", "kalshi_volume": "0"},
+        ], "matched")
+        self.assertEqual(summary["average_liquidity"], 103 / 3)
+        self.assertEqual(summary["median_liquidity"], 2)
+        self.assertEqual(summary["polymarket_median_liquidity"], 2)
 
     def test_performance_history_reclassifies_challenger_tickers(self):
         def result(volume):
