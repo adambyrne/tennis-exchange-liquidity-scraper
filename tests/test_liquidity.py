@@ -972,6 +972,45 @@ class LiquidityTests(unittest.TestCase):
         self.assertEqual(bounded[-1]["refresh"], HISTORY_LIMIT + 1)
         self.assertEqual(bounded[0]["refresh"], 2)
 
+    def test_performance_history_reclassifies_challenger_tickers(self):
+        def result(volume):
+            return {
+                "id": "polymarket-event|KXATPCHALLENGERMATCH-26SEP29TEST",
+                "grade": "atp",
+                "start_time": "2026-10-01T12:00:00+00:00",
+                "polymarket_volume": str(volume),
+                "kalshi_volume": "0",
+                "polymarket_depth": "1000",
+                "kalshi_depth": "0",
+            }
+
+        prior_history = [
+            {
+                "refresh": refresh,
+                "timestamp": f"2026-10-01T{hour:02}:00:00+00:00",
+                "results": [result(volume)],
+            }
+            for refresh, hour, volume in ((1, 10, 100), (2, 11, 200))
+        ]
+        updated = append_history(
+            {
+                "updated_at": "2026-10-01T12:00:00+00:00",
+                "results": [result(300)],
+            },
+            prior_history,
+        )
+
+        for entry in updated:
+            self.assertEqual(entry["results"][0]["grade"], "atp_challenger")
+            self.assertEqual(
+                [row["label"] for row in entry["views"]["matched"]["tournaments"]],
+                ["atp_challenger"],
+            )
+        self.assertEqual(
+            updated[1]["betting_activity"]["grades"][0]["label"],
+            "atp_challenger",
+        )
+
     def test_historical_liquidity_ranges_split_ties_and_track_zero_liquidity(self):
         data = {
             "updated_at": "2026-10-02T10:00:00+00:00",
