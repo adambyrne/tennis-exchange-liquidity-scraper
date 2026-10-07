@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .matching import LiquidityComparison, displayed_orderbook_depth
-from .models import LiquiditySnapshot
+from .models import CompetitionGrade, LiquiditySnapshot
 from .providers import KalshiPublicLiquidityProvider, PolymarketPublicLiquidityProvider
 from .scraper import collect_once
 from .storage import connect_database, load_latest_comparisons
@@ -248,7 +248,7 @@ const usd = value => new Intl.NumberFormat(undefined,{style:"currency",currency:
 const esc = value => String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const STATIC_MODE = false;
 const REFRESH_API_BASE = "";
-const HISTORY_GRADE_ORDER=["grand_slam","atp","wta","itf"],HISTORY_EXCLUDED_GRADES=["atp_challenger","utr","unknown"];
+const HISTORY_GRADE_ORDER=["grand_slam","atp","atp_challenger","wta","itf"],HISTORY_EXCLUDED_GRADES=["utr","unknown"];
 const ACTIVITY_BUCKETS=[{key:"before_24h",label:"24h+ Before"},{key:"before_24_12h",label:"24-12h Before"},{key:"before_12_2h",label:"12-2h Before"},{key:"before_2_0h",label:"2-0h Before"},{key:"in_play",label:"In-Play"}];
 let currentResults=[], allHistory=[], refreshSession=null, sortColumn="polymarket", sortDirection="descending", selectedGrade="all", selectedStatus="both", dataView="matched", expandedMatches=new Set(), expandedRanges=new Set(), expandedHistory=new Set(), expandedLiquidityHistory=new Set(), historySortColumn="refresh", historySortDirection="descending", liquidityHistorySortColumn="refresh", liquidityHistorySortDirection="descending", gradeLiquiditySortColumn="refresh", gradeLiquiditySortDirection="descending", progressTimer;
 function show(message, kind){const n=document.getElementById("notice");n.textContent=message;n.className="notice show "+kind}
@@ -340,6 +340,22 @@ updateViewLabels();document.getElementById("run").textContent=STATIC_MODE?"Refre
 </script></body></html>"""
 
 
+def _comparison_grade(comparison: LiquidityComparison) -> CompetitionGrade:
+    polymarket_grade = comparison.polymarket.grade
+    kalshi_grade = comparison.kalshi.grade
+    grade = (
+        polymarket_grade
+        if polymarket_grade != CompetitionGrade.UNKNOWN
+        else kalshi_grade
+    )
+    if (
+        grade == CompetitionGrade.ATP
+        and CompetitionGrade.ATP_CHALLENGER in {polymarket_grade, kalshi_grade}
+    ):
+        return CompetitionGrade.ATP_CHALLENGER
+    return grade
+
+
 def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
     def market_details(
         snapshot: LiquiditySnapshot,
@@ -375,11 +391,7 @@ def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
     return {
         "id": f"{comparison.polymarket.source_event_id}|{comparison.kalshi.source_event_id}",
         "competitors": " vs ".join(comparison.polymarket.competitor_names),
-        "grade": (
-            comparison.polymarket.grade
-            if comparison.polymarket.grade.value != "unknown"
-            else comparison.kalshi.grade
-        ).value,
+        "grade": _comparison_grade(comparison).value,
         "phase": phase,
         "start_time": comparison.polymarket.start_time.isoformat(),
         "polymarket_volume": str(comparison.polymarket_volume),
@@ -398,11 +410,7 @@ def _comparison_json(comparison: LiquidityComparison) -> dict[str, Any]:
 def _liquidity_distribution(comparisons: list[LiquidityComparison]) -> list[dict[str, Any]]:
     grouped: dict[str, dict[str, int]] = {}
     for comparison in comparisons:
-        grade = (
-            comparison.polymarket.grade
-            if comparison.polymarket.grade.value != "unknown"
-            else comparison.kalshi.grade
-        ).value
+        grade = _comparison_grade(comparison).value
         row = grouped.setdefault(grade, {"total": 0, "polymarket_wins": 0, "kalshi_wins": 0})
         row["total"] += 1
         row["polymarket_wins"] += comparison.volume_leader == "Polymarket"

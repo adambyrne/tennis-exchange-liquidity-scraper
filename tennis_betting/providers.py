@@ -217,9 +217,7 @@ class PolymarketPublicLiquidityProvider:
             for series in event.get("series", [])
             if isinstance(series, dict)
         ]
-        grade = classify_event(event_name)
-        if grade.value == "unknown":
-            grade = classify_event(" ".join([*sport_names, *series_names]))
+        grade = classify_event(" ".join([event_name, *sport_names, *series_names]))
         return normalize_snapshot({
             "event_id": market.get("event_id") or market.get("conditionId") or market.get("id"),
             "market_id": market.get("id") or market.get("conditionId"),
@@ -508,7 +506,9 @@ class KalshiPublicLiquidityProvider:
             }
             for winner_market, book in market_books
         ]
-        grade = classify_event(f"{series_title} {event.get('title', '')}")
+        grade = classify_event(
+            f"{series_ticker} {series_title} {event.get('title', '')}"
+        )
         return normalize_snapshot({
             "event_id": event_ticker,
             "market_id": market_ticker,
