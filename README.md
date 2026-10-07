@@ -135,6 +135,9 @@ The view switch includes a short description of each data mode and sits beside
 are grouped with a reset action, followed by the two summary cards. Match rows
 show tournament/status badges and can be expanded to compare venue-specific
 market details. Refreshing uses skeleton rows and a completion indicator.
+The **Average / Median** control switches displayed average liquidity
+calculations to medians across matches and historical snapshots. Its selection
+is saved in browser local storage.
 Doubles teams are matched as pairs, including abbreviated
 Polymarket names, and Kalshi ATP Challenger series are included even when the
 series title omits the word "match". Use `--host` or `--port` if needed.
@@ -185,7 +188,7 @@ The **Historical Data** tab contains the **Performance History** and
 matched-result snapshot and separate Matched Amount and Order Book Depth
 tournament and liquidity-range breakdowns, including platform leader
 percentages and match counts. History rows also show overall and per-grade
-average combined liquidity in USD for each view. Older snapshots are upgraded from their saved results
+average or median combined liquidity in USD for each view. Older snapshots are upgraded from their saved results
 when the next history record is published. Switch the active data view to
 inspect that view's history; sort by
 refresh number, timestamp, leader share, or match count, and expand a row to
