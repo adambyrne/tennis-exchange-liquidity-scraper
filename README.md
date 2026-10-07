@@ -206,8 +206,10 @@ provider sport/series metadata, and (for Kalshi) series identifiers. When the
 two providers disagree between generic ATP and ATP Challenger for a matched
 event, the more-specific Challenger classification is used. The distinction
 flows through filters, summaries, match badges, activity, and historical grade
-tables. Existing retained snapshots that only recorded generic ATP cannot be
-reclassified safely and remain unchanged; new snapshots carry the split.
+tables. When retained historical result IDs contain a Kalshi ATP Challenger
+series ticker, the next published refresh reclassifies those rows and rebuilds
+their historical summaries. Older ATP records without a decisive ticker remain
+unchanged; new snapshots carry the split.
 
 The **Historical Grade Liquidity Comparison** table shows one row per refresh
 and a pair of Polymarket/Kalshi average-liquidity columns for each grade, with

@@ -244,10 +244,20 @@ def _activity_breakdown(
     }
 
 
+def _reclassify_historical_result(result: dict[str, Any]) -> dict[str, Any]:
+    if result.get("grade") != "atp":
+        return result
+    source_ids = str(result.get("id") or "").split("|")
+    if any(source_id.casefold().startswith("kxatpchallenger") for source_id in source_ids):
+        return {**result, "grade": "atp_challenger"}
+    return result
+
+
 def _history_entry(data: dict[str, Any], refresh_number: int) -> dict[str, Any]:
     results = data.get("results")
     if not isinstance(results, list):
         raise ValueError("scrape data must include a results list")
+    results = [_reclassify_historical_result(result) for result in results]
     views = {}
     for view in ("matched", "depth"):
         views[view] = {
@@ -290,7 +300,7 @@ def append_history(
             if index == 0 and "betting_activity" in entry:
                 upgraded["betting_activity"] = entry["betting_activity"]
             upgraded_entries.append(upgraded)
-            previous_results = entry["results"]
+            previous_results = upgraded["results"]
         else:
             upgraded_entries.append(entry)
     entries = upgraded_entries
